@@ -7,6 +7,23 @@ const TEXT_VALIDATION_SAMPLE_SIZE = 4096 // Check first 4KB for binary indicator
 const VALID_BYTE_RATIO = 0.95 // Reduced from 0.99 to 0.95
 const CONTROL_CHAR_THRESHOLD = 0.05 // Increased from 0.01 to 0.05
 
+const BINARY_SIGNATURES = new Map([
+	// Images
+	[[0xff, 0xd8, 0xff], "image/jpeg"], // JPEG
+	[[0x89, 0x50, 0x4e, 0x47], "image/png"], // PNG
+	[[0x47, 0x49, 0x46], "image/gif"], // GIF
+	// Archives
+	[[0x50, 0x4b, 0x03, 0x04], "application/zip"], // ZIP
+	[[0x52, 0x61, 0x72, 0x21], "application/rar"], // RAR
+	// PDFs
+	[[0x25, 0x50, 0x44, 0x46], "application/pdf"], // PDF
+	// Office documents
+	[[0x50, 0x4b, 0x03, 0x04], "application/msoffice"], // Office files (DOCX, XLSX, etc.)
+	// Executables
+	[[0x4d, 0x5a], "application/exe"], // EXE
+	[[0x7f, 0x45, 0x4c, 0x46], "application/elf"], // ELF
+])
+
 export async function isTextFile(filePath: string, maxSize: number): Promise<boolean> {
 	const stats = await vscode.workspace.fs.stat(vscode.Uri.file(filePath))
 	if (stats.type === vscode.FileType.Directory) return false
@@ -16,15 +33,10 @@ export async function isTextFile(filePath: string, maxSize: number): Promise<boo
 	const fileContent = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath))
 	const buffer = Buffer.from(fileContent)
 
-	// 1. Check for known binary types using file-type
-	const type = await fileTypeFromBuffer(buffer)
-	if (type) {
-		// Reject if detected as binary type (non-text)
-		const isBinary = !type.mime.startsWith("text/") && !["application/json", "application/xml"].includes(type.mime)
-		if (isBinary) {
-			console.log(`File ${filePath} rejected: binary MIME type ${type.mime}`)
-			return false
-		}
+	// 1. Check for binary file signatures
+	if (hasBinarySignature(buffer)) {
+		console.log(`File ${filePath} rejected: matches binary signature`)
+		return false
 	}
 
 	// 2. Validate UTF-8 encoding
@@ -52,6 +64,24 @@ export async function isTextFile(filePath: string, maxSize: number): Promise<boo
 		console.log(`File ${filePath} rejected: failed character ratio checks`)
 	}
 	return isValid
+}
+
+function hasBinarySignature(buffer: Buffer): boolean {
+	if (buffer.length < 2) return false
+
+	for (const [signature, _] of BINARY_SIGNATURES) {
+		if (signature.length > buffer.length) continue
+
+		let matches = true
+		for (let i = 0; i < signature.length; i++) {
+			if (buffer[i] !== signature[i]) {
+				matches = false
+				break
+			}
+		}
+		if (matches) return true
+	}
+	return false
 }
 
 function analyzeBytes(buffer: Buffer): { controlCount: number; validCount: number; totalSampled: number } {
