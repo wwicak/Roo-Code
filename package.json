@@ -230,7 +230,7 @@
 		"check-types:extension": "tsc --noEmit",
 		"check-types:webview": "cd webview-ui && npm run check-types",
 		"test": "npm-run-all -l -s test:*",
-		"test:extension": "jest -- -u",
+		"test:extension": "jest",
 		"test:webview": "cd webview-ui && npm run test",
 		"build": "npm-run-all -l -s build:webview build:extension",
 		"build:extension": "mkdir -p bin && npx vsce package --out bin",
