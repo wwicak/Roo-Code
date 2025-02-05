@@ -23,7 +23,7 @@ export interface LanguageParser {
 }
 
 async function loadLanguage(langName: string, wasmDir: string) {
-	return await Parser.Language.load(path.join(wasmDir, `tree-sitter-${langName}.wasm`))
+	return Parser.Language.load(path.join(wasmDir, `tree-sitter-${langName}.wasm`))
 }
 
 let isParserInitialized = false

@@ -3026,7 +3026,7 @@ export class Cline {
 	}
 
 	async loadContext(userContent: UserContent, includeFileDetails: boolean = false) {
-		return await Promise.all([
+		return Promise.all([
 			// Process userContent array, which contains various block types:
 			// TextBlockParam, ImageBlockParam, ToolUseBlockParam, and ToolResultBlockParam.
 			// We need to apply parseMentions() to:
