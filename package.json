@@ -221,7 +221,6 @@
 		"install:all": "npm run install:extension && npm run install:webview",
 		"install:extension": "npm install",
 		"install:webview": "cd webview-ui && npm install",
-		"lint": "eslint \"src/**/*.{js,jsx,ts,tsx}\"",
 		"lint:fix": "eslint \"src/**/*.{js,jsx,ts,tsx}\" --fix",
 		"lint": "npm-run-all -l -p lint:*",
 		"lint:extension": "eslint src --ext ts",
