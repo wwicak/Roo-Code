@@ -156,7 +156,8 @@ export async function loadRequiredLanguageParsers(
 				query = language.query(queries?.[ext] || defaultQueries[ext])
 				break
 			default:
-				throw new Error(`Unsupported language: ${ext}`)
+				console.log(`Unsupported language: ${ext}`)
+				continue
 		}
 		const parser = new Parser()
 		parser.setLanguage(language)
