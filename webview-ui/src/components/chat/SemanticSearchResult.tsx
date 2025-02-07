@@ -2,7 +2,6 @@ import React, { useState } from "react"
 import { VSCodeBadge } from "@vscode/webview-ui-toolkit/react"
 import { vscode } from "../../utils/vscode"
 import { WebviewMessage } from "../../../../src/shared/WebviewMessage"
-import path from "path-browserify"
 
 interface SearchResult {
 	type: "file" | "code"
@@ -45,7 +44,11 @@ const SemanticSearchResult: React.FC<SemanticSearchResultProps> = ({ query, resu
 	}
 
 	const getFileName = (filePath: string) => {
-		return path.basename(filePath)
+		const lastSeparator = Math.max(
+			filePath.lastIndexOf("/"),
+			filePath.lastIndexOf("\\")
+		);
+		return filePath.substring(lastSeparator + 1);
 	}
 
 	return (
