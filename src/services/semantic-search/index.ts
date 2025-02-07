@@ -163,54 +163,43 @@ export class SemanticSearchService {
 			if (isCode) {
 				const parsedFile = await this.parser.parseFile(filePath, hash)
 				console.log("Parsed file", parsedFile)
-				if (!parsedFile) {
-					console.error("Failed to parse file", filePath)
-					return
+
+				if (parsedFile) {
+					if (parsedFile.segments.length === 0) {
+						console.log(`No code segments found in ${filePath}, falling back to text processing`)
+						// Process as text file since no code segments were found
+						const chunks = SemanticSearchService.chunkText(textContent)
+						for (const [index, chunk] of chunks.entries()) {
+							const definition: CodeDefinition = {
+								type: "file",
+								name: `${path.basename(filePath)} #${index + 1}`,
+								filePath: filePath,
+								content: chunk,
+								startLine: 1 + index * 100, // Approximate line numbers
+								endLine: 1 + (index + 1) * 100,
+								language: path.extname(filePath).slice(1) || "text",
+								contentHash: hash,
+							}
+							await this.indexDefinition(definition)
+						}
+					} else {
+						// Process normally if we have code segments
+						for (const segment of parsedFile.segments) {
+							const definition = {
+								...convertSegmentToDefinition(segment, filePath),
+								contentHash: hash,
+							}
+							await this.indexDefinition(definition)
+						}
+					}
+				} else {
+					console.error("Failed to parse file, processing as text file", filePath)
+					await this.processTextFile(filePath)
 				}
 
 				// Check if we got any segments from parsing
-				if (parsedFile.segments.length === 0) {
-					console.log(`No code segments found in ${filePath}, falling back to text processing`)
-					// Process as text file since no code segments were found
-					const chunks = SemanticSearchService.chunkText(textContent)
-					for (const [index, chunk] of chunks.entries()) {
-						const definition: CodeDefinition = {
-							type: "file",
-							name: `${path.basename(filePath)} #${index + 1}`,
-							filePath: filePath,
-							content: chunk,
-							startLine: 1 + index * 100, // Approximate line numbers
-							endLine: 1 + (index + 1) * 100,
-							language: path.extname(filePath).slice(1) || "text",
-							contentHash: hash,
-						}
-						await this.indexDefinition(definition)
-					}
-				} else {
-					// Process normally if we have code segments
-					for (const segment of parsedFile.segments) {
-						const definition = {
-							...convertSegmentToDefinition(segment, filePath),
-							contentHash: hash,
-						}
-						await this.indexDefinition(definition)
-					}
-				}
 			} else {
-				const chunks = SemanticSearchService.chunkText(textContent)
-				for (const [index, chunk] of chunks.entries()) {
-					const definition: CodeDefinition = {
-						type: "file",
-						name: `${path.basename(filePath)} #${index + 1}`,
-						filePath: filePath,
-						content: chunk,
-						startLine: 1 + index * 100, // Approximate line numbers
-						endLine: 1 + (index + 1) * 100,
-						language: path.extname(filePath).slice(1) || "text",
-						contentHash: hash,
-					}
-					await this.indexDefinition(definition)
-				}
+				await this.processTextFile(filePath)
 			}
 		} catch (error) {
 			if (error instanceof Error && error.message.includes("binary")) {
@@ -218,6 +207,25 @@ export class SemanticSearchService {
 				return
 			}
 			console.error(`Error processing file ${filePath}:`, error)
+		}
+	}
+
+	async processTextFile(filePath: string): Promise<void> {
+		const textContent = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath))
+		const hash = crypto.createHash("sha256").update(textContent).digest("hex")
+		const chunks = SemanticSearchService.chunkText(new TextDecoder().decode(textContent))
+		for (const [index, chunk] of chunks.entries()) {
+			const definition: CodeDefinition = {
+				type: "file",
+				name: `${path.basename(filePath)} #${index + 1}`,
+				filePath: filePath,
+				content: chunk,
+				startLine: 1 + index * 100, // Approximate line numbers
+				endLine: 1 + (index + 1) * 100,
+				language: path.extname(filePath).slice(1) || "text",
+				contentHash: hash,
+			}
+			await this.indexDefinition(definition)
 		}
 	}
 
