@@ -1,6 +1,4 @@
-import { fileTypeFromBuffer } from "file-type"
 import * as vscode from "vscode"
-import * as path from "path"
 
 // Configurable parameters
 const TEXT_VALIDATION_SAMPLE_SIZE = 4096 // Check first 4KB for binary indicators
@@ -137,13 +135,21 @@ function isValidUtf8(buffer: Buffer): boolean {
 export async function isCodeFile(filePath: string): Promise<boolean> {
 	// 1. Check using VS Code's language detection
 	const language = await getVSCodeLanguage(filePath)
-	if (language && isProgrammingLanguage(language)) {
-		return true
-	}
 
-	// 2. Check for common code patterns in content
-	const content = await readFileSample(filePath, 512)
-	return hasCodePatterns(content)
+    // If VS Code detects a non-code language, trust it.
+    if (language && !isProgrammingLanguage(language)) {
+        return false;
+    }
+
+    // If VS Code detects a code language, trust it.
+    if (language && isProgrammingLanguage(language)) {
+        return true;
+    }
+
+	// 2. If VS Code language detection is inconclusive, check for code patterns.
+    //    Be more strict in this check.
+	const content = await readFileSample(filePath, 1024); // Increased sample size
+	return hasStrongCodePatterns(content); // Use a stricter check
 }
 
 async function getVSCodeLanguage(filePath: string): Promise<string | undefined> {
@@ -186,14 +192,29 @@ async function readFileSample(filePath: string, bytes: number): Promise<string> 
 	}
 }
 
-function hasCodePatterns(content: string): boolean {
-	// Look for code indicators in the first 512 characters
-	const CODE_PATTERNS = [
-		/\b(function|class|interface|def|fn)\b/, // Common keywords
-		/[\{\}\(\)=><+\-*/%]/, // Operators and brackets
-		/\/\/|# |\/\*/, // Comments
-		/(import|from|require|using)\s+['"]/, // Import statements
-	]
+// Stricter code pattern check
+function hasStrongCodePatterns(content: string): boolean {
+  // More specific patterns, requiring more context.
+  const CODE_PATTERNS = [
+    // Function/class declarations with brackets
+    /\b(function|class|interface|def|fn)\s+[a-zA-Z_]\w*\s*[\(\{]/,
+    // Import statements with specific formats
+    /(import\s+.+?\s+from\s+['"][a-zA-Z0-9@_/.-]+['"]|from\s+['"][a-zA-Z0-9@_/.-]+['"]\s+import\s+.+?|require\s*\(\s*['"][a-zA-Z0-9@_/.-]+['"]\s*\))/,
+    // Common multi-line comment blocks
+    /\/\*[\s\S]*?\*\//,
+    // Shebang lines (for scripts)
+    /^#! ?.*\//,
+  ];
 
-	return CODE_PATTERNS.some((pattern) => pattern.test(content))
+  // Require at least two different patterns to match
+  let matchCount = 0;
+  for (const pattern of CODE_PATTERNS) {
+    if (pattern.test(content)) {
+      matchCount++;
+    }
+    if (matchCount >= 2) {
+      return true; // More confident it's code
+    }
+  }
+  return false;
 }
