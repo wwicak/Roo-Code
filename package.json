@@ -3,7 +3,7 @@
 	"displayName": "Roo Code (prev. Roo Cline)",
 	"description": "A VS Code plugin that enhances coding with AI-powered automation, multi-model support, and experimental features.",
 	"publisher": "RooVeterinaryInc",
-	"version": "3.3.12",
+	"version": "3.3.14",
 	"icon": "assets/icons/rocket.png",
 	"galleryBanner": {
 		"color": "#617A91",
@@ -123,6 +123,31 @@
 				"command": "roo-cline.addToContext",
 				"title": "Roo Code: Add To Context",
 				"category": "Roo Code"
+			},
+			{
+				"command": "roo-cline.terminalAddToContext",
+				"title": "Roo Code: Add Terminal Content to Context",
+				"category": "Terminal"
+			},
+			{
+				"command": "roo-cline.terminalFixCommand",
+				"title": "Roo Code: Fix This Command",
+				"category": "Terminal"
+			},
+			{
+				"command": "roo-cline.terminalExplainCommand",
+				"title": "Roo Code: Explain This Command",
+				"category": "Terminal"
+			},
+			{
+				"command": "roo-cline.terminalFixCommandInCurrentTask",
+				"title": "Roo Code: Fix This Command (Current Task)",
+				"category": "Terminal"
+			},
+			{
+				"command": "roo-cline.terminalExplainCommandInCurrentTask",
+				"title": "Roo Code: Explain This Command (Current Task)",
+				"category": "Terminal"
 			}
 		],
 		"menus": {
@@ -146,6 +171,28 @@
 					"command": "roo-cline.addToContext",
 					"when": "editorHasSelection",
 					"group": "Roo Code@4"
+				}
+			],
+			"terminal/context": [
+				{
+					"command": "roo-cline.terminalAddToContext",
+					"group": "Roo Code@1"
+				},
+				{
+					"command": "roo-cline.terminalFixCommand",
+					"group": "Roo Code@2"
+				},
+				{
+					"command": "roo-cline.terminalExplainCommand",
+					"group": "Roo Code@3"
+				},
+				{
+					"command": "roo-cline.terminalFixCommandInCurrentTask",
+					"group": "Roo Code@5"
+				},
+				{
+					"command": "roo-cline.terminalExplainCommandInCurrentTask",
+					"group": "Roo Code@6"
 				}
 			],
 			"view/title": [
@@ -217,35 +264,30 @@
 		}
 	},
 	"scripts": {
-		"prepare": "husky",
-		"install:all": "npm run install:extension && npm run install:webview",
-		"install:extension": "npm install",
-		"install:webview": "cd webview-ui && npm install",
-		"lint:fix": "eslint \"src/**/*.{js,jsx,ts,tsx}\" --fix",
-		"lint": "npm-run-all -l -p lint:*",
-		"lint:extension": "eslint src --ext ts",
-		"lint:webview": "cd webview-ui && npm run lint",
-		"check-types": "npm-run-all -l -p check-types:*",
-		"check-types:extension": "tsc --noEmit",
-		"check-types:webview": "cd webview-ui && npm run check-types",
-		"test": "npm-run-all -l -s test:*",
-		"test:extension": "jest",
-		"test:webview": "cd webview-ui && npm run test",
-		"build": "npm-run-all -l -s build:webview build:extension",
-		"build:extension": "mkdir -p bin && npx vsce package --out bin",
+		"build": "npm run build:webview && npm run vsix",
 		"build:webview": "cd webview-ui && npm run build",
+		"changeset": "changeset",
+		"check-types": "tsc --noEmit",
+		"compile": "tsc -p . --outDir out && node esbuild.js",
+		"compile:integration": "tsc -p tsconfig.integration.json",
+		"install:all": "npm install && cd webview-ui && npm install",
+		"lint": "eslint src --ext ts && npm run lint --prefix webview-ui",
+		"package": "npm run build:webview && npm run check-types && npm run lint && node esbuild.js --production",
+		"pretest": "npm run compile && npm run compile:integration",
 		"dev": "cd webview-ui && npm run dev",
-		"qa": "npm-run-all -l -p lint check-types && node esbuild.js",
-		"e2e": "npm run build && tsc -p tsconfig.e2e.json && npx dotenvx run -f .env.e2e -- vscode-test",
+		"test": "jest && npm run test:webview",
+		"test:webview": "cd webview-ui && npm run test",
+		"test:integration": "npm run build && npm run compile:integration && npx dotenvx run -f .env.integration -- vscode-test",
+		"prepare": "husky",
+		"publish:marketplace": "vsce publish && ovsx publish",
+		"publish": "npm run build && changeset publish && npm install --package-lock-only",
+		"version-packages": "changeset version && npm install --package-lock-only",
 		"vscode:prepublish": "npm run package",
+		"vsix": "mkdir -p bin && npx vsce package --out bin",
 		"watch": "npm-run-all -p watch:*",
 		"watch:esbuild": "node esbuild.js --watch",
 		"watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
-		"package": "npm-run-all -l -p lint check-types && node esbuild.js --production",
-		"changeset": "changeset",
-		"version-packages": "changeset version && npm install --package-lock-only",
-		"publish": "npm run build && changeset publish && npm install --package-lock-only",
-		"publish:marketplace": "vsce publish && ovsx publish"
+		"watch-tests": "tsc -p . -w --outDir out"
 	},
 	"dependencies": {
 		"@anthropic-ai/bedrock-sdk": "^0.10.2",

@@ -21,4 +21,4 @@ roo-cline-*.vsix
 docs/_site/
 
 # Dotenv
-.env.e2e
+.env.integration

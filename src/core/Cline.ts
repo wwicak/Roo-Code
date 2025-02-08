@@ -838,7 +838,7 @@ export class Cline {
 		this.lastApiRequestTime = Date.now()
 
 		if (mcpEnabled ?? true) {
-			mcpHub = this.providerRef.deref()?.mcpHub
+			mcpHub = this.providerRef.deref()?.getMcpHub()
 			if (!mcpHub) {
 				throw new Error("MCP hub not available")
 			}
@@ -2277,7 +2277,8 @@ export class Cline {
 								await this.say("mcp_server_request_started") // same as browser_action_result
 								const toolResult = await this.providerRef
 									.deref()
-									?.mcpHub?.callTool(server_name, tool_name, parsedArguments)
+									?.getMcpHub()
+									?.callTool(server_name, tool_name, parsedArguments)
 
 								// TODO: add progress indicator and ability to parse images and non-text responses
 								const toolResultPretty =
@@ -2345,7 +2346,8 @@ export class Cline {
 								await this.say("mcp_server_request_started")
 								const resourceResult = await this.providerRef
 									.deref()
-									?.mcpHub?.readResource(server_name, uri)
+									?.getMcpHub()
+									?.readResource(server_name, uri)
 								const resourceResultPretty =
 									resourceResult?.contents
 										.map((item) => {

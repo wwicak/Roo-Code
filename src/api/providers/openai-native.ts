@@ -17,9 +17,8 @@ export class OpenAiNativeHandler implements ApiHandler, SingleCompletionHandler 
 
 	constructor(options: ApiHandlerOptions) {
 		this.options = options
-		this.client = new OpenAI({
-			apiKey: this.options.openAiNativeApiKey,
-		})
+		const apiKey = this.options.openAiNativeApiKey ?? "not-provided"
+		this.client = new OpenAI({ apiKey })
 	}
 
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
