@@ -176,6 +176,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			await this.postStateToWebview()
 		})
 
+
 		// Await for the semantic search service to be initialized
 		if (this.semanticSearchServicePromise) {
 			this.semanticSearchServicePromise.then((service) => {
@@ -2849,7 +2850,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	get messages() {
 		return this.cline?.clineMessages || []
 	}
-
+  
   // Add public getter
 	public getMcpHub(): McpHub | undefined {
 		return this.mcpHub
@@ -2900,3 +2901,5 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		}
 	}
 }
+
+
