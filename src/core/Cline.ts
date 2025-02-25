@@ -1,4 +1,6 @@
 import { Anthropic } from "@anthropic-ai/sdk"
+import { NebiusEmbeddingService } from "../services/embedding/NebiusEmbeddingService"
+import { getFunctionModifications } from "./diff/strategies/new-unified/ast-diff"
 import cloneDeep from "clone-deep"
 import { DiffStrategy, getDiffStrategy, UnifiedDiffStrategy } from "./diff/DiffStrategy"
 import { validateToolUse, isToolAllowedForMode, ToolName } from "./mode-validator"
@@ -90,6 +92,7 @@ export type ClineOptions = {
 export class Cline {
 	readonly taskId: string
 	api: ApiHandler
+	private embeddingService: NebiusEmbeddingService
 	private terminalManager: TerminalManager
 	private urlContentFetcher: UrlContentFetcher
 	private browserSession: BrowserSession
@@ -151,6 +154,10 @@ export class Cline {
 
 		this.taskId = crypto.randomUUID()
 		this.api = buildApiHandler(apiConfiguration)
+		// Initialize embedding service with hardcoded key as per ADR
+		this.embeddingService = new NebiusEmbeddingService(
+			"eyJhbGciOiJIUzI1NiIsImtpZCI6IlV6SXJWd1h0dnprLVRvdzlLZWstc0M1akptWXBvX1VaVkxUZlpnMDRlOFUiLCJ0eXAiOiJKV1QifQ.eyJzdWIiOiJnb29nbGUtb2F1dGgyfDEwNTc0NDkwNDMzOTc4MDE2NjkyMiIsInNjb3BlIjoib3BlbmlkIG9mZmxpbmVfYWNjZXNzIiwiaXNzIjoiYXBpX2tleV9pc3N1ZXIiLCJhdWQiOlsiaHR0cHM6Ly9uZWJpdXMtaW5mZXJlbmNlLmV1LmF1dGgwLmNvbS9hcGkvdjIvIl0sImV4cCI6MTg5NzI4Mjg0MiwidXVpZCI6IjA0NjYxNDhjLTJkYzEtNGEzMy1hOTU1LTM2MDUxMzg0NzVlNSIsIm5hbWUiOiJkaWZmIiwiZXhwaXJlc19hdCI6IjIwMzAtMDItMTRUMDc6MDA6NDIrMDAwMCJ9.VCOD4QfxwPhiHqlFFXps2dZwjap0iGf3lyaK_GjpGBU",
+		)
 		this.terminalManager = new TerminalManager()
 		this.urlContentFetcher = new UrlContentFetcher(provider.context)
 		this.browserSession = new BrowserSession(provider.context)
@@ -1175,6 +1182,8 @@ export class Cline {
 							const modeName = getModeBySlug(mode, customModes)?.name ?? mode
 							return `[${block.name} in ${modeName} mode: '${message}']`
 						}
+						default:
+							return `[${block.name}]`
 					}
 				}
 
@@ -1306,6 +1315,98 @@ export class Cline {
 				}
 
 				switch (block.name) {
+					case "modify_function_body": {
+						const relPath: string | undefined = block.params.path
+						const functionId: string | undefined = block.params.function_identifier
+						const newBody: string | undefined = block.params.new_body
+						if (!relPath || !functionId || !newBody) {
+							// Wait for complete parameters
+							break
+						}
+
+						const absolutePath = path.resolve(cwd, relPath)
+						const fileExists = await fileExistsAtPath(absolutePath)
+
+						if (!fileExists) {
+							this.consecutiveMistakeCount++
+							pushToolResult(formatResponse.toolError(`File does not exist at path: ${absolutePath}`))
+							break
+						}
+
+						const oldContent = await fs.readFile(absolutePath, "utf-8")
+						const newContent = oldContent // We'll update this with AST changes
+
+						const modifications = await getFunctionModifications(
+							oldContent,
+							newContent,
+							relPath,
+							this.embeddingService,
+						)
+
+						if (!modifications) {
+							this.consecutiveMistakeCount++
+							pushToolResult(formatResponse.toolError("No supported modifications found"))
+							break
+						}
+
+						this.consecutiveMistakeCount = 0
+
+						try {
+							// Show the modifications in the diff view
+							this.diffViewProvider.editType = "modify"
+							await this.diffViewProvider.open(relPath)
+							await this.diffViewProvider.update(newContent, true)
+							await this.diffViewProvider.scrollToFirstDiff()
+
+							const completeMessage = JSON.stringify({
+								tool: "editedExistingFile",
+								path: getReadablePath(cwd, relPath),
+								diff: formatResponse.createPrettyPatch(relPath, oldContent, newContent),
+							})
+
+							const didApprove = await askApproval("tool", completeMessage)
+							if (!didApprove) {
+								await this.diffViewProvider.revertChanges()
+								break
+							}
+
+							const { newProblemsMessage, userEdits, finalContent } =
+								await this.diffViewProvider.saveChanges()
+							this.didEditFile = true
+
+							if (userEdits) {
+								await this.say(
+									"user_feedback_diff",
+									JSON.stringify({
+										tool: "editedExistingFile",
+										path: getReadablePath(cwd, relPath),
+										diff: userEdits,
+									}),
+								)
+								pushToolResult(
+									`The user made the following updates to your content:\n\n${userEdits}\n\n` +
+										`The updated content, which includes both your original modifications and the user's edits, has been successfully saved to ${relPath.toPosix()}. Here is the full, updated content of the file:\n\n` +
+										`<final_file_content path="${relPath.toPosix()}">\n${finalContent}\n</final_file_content>\n\n` +
+										`Please note:\n` +
+										`1. You do not need to re-write the file with these changes, as they have already been applied.\n` +
+										`2. Proceed with the task using this updated file content as the new baseline.\n` +
+										`3. If the user's edits have addressed part of the task or changed the requirements, adjust your approach accordingly.` +
+										`${newProblemsMessage}`,
+								)
+							} else {
+								pushToolResult(
+									`The content was successfully saved to ${relPath.toPosix()}.${newProblemsMessage}`,
+								)
+							}
+							await this.diffViewProvider.reset()
+							break
+						} catch (error) {
+							await handleError("modifying function", error)
+							await this.diffViewProvider.reset()
+							break
+						}
+					}
+
 					case "write_to_file": {
 						const relPath: string | undefined = block.params.path
 						let newContent: string | undefined = block.params.content

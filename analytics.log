@@ -1,0 +1,18 @@
+{"event": "launched", "properties": {}, "user_id": "bc085b07-edb2-4db7-9f8c-b7ecf77f347a", "time": 1739850304}
+{"event": "model warning", "properties": {"main_model": "openrouter/anthropic/claude-3.5-sonnet:beta", "weak_model": "openrouter/REDACTED", "editor_model": "openrouter/REDACTED"}, "user_id": "bc085b07-edb2-4db7-9f8c-b7ecf77f347a", "time": 1739850309}
+{"event": "repo", "properties": {"num_files": 425}, "user_id": "bc085b07-edb2-4db7-9f8c-b7ecf77f347a", "time": 1739850309}
+{"event": "cli session", "properties": {"main_model": "openrouter/anthropic/claude-3.5-sonnet:beta", "weak_model": "openrouter/REDACTED", "editor_model": "openrouter/REDACTED", "edit_format": "diff"}, "user_id": "bc085b07-edb2-4db7-9f8c-b7ecf77f347a", "time": 1739850309}
+{"event": "exit", "properties": {"reason": "Control-C"}, "user_id": "bc085b07-edb2-4db7-9f8c-b7ecf77f347a", "time": 1739850325}
+{"event": "launched", "properties": {}, "user_id": "bc085b07-edb2-4db7-9f8c-b7ecf77f347a", "time": 1739850417}
+{"event": "model warning", "properties": {"main_model": "openrouter/deepseek/deepseek-r1", "weak_model": "openrouter/deepseek/deepseek-chat", "editor_model": "openrouter/REDACTED"}, "user_id": "bc085b07-edb2-4db7-9f8c-b7ecf77f347a", "time": 1739850419}
+{"event": "repo", "properties": {"num_files": 425}, "user_id": "bc085b07-edb2-4db7-9f8c-b7ecf77f347a", "time": 1739850419}
+{"event": "cli session", "properties": {"main_model": "openrouter/deepseek/deepseek-r1", "weak_model": "openrouter/deepseek/deepseek-chat", "editor_model": "openrouter/REDACTED", "edit_format": "diff"}, "user_id": "bc085b07-edb2-4db7-9f8c-b7ecf77f347a", "time": 1739850419}
+{"event": "command_map", "properties": {}, "user_id": "bc085b07-edb2-4db7-9f8c-b7ecf77f347a", "time": 1739850423}
+{"event": "command_tokens", "properties": {}, "user_id": "bc085b07-edb2-4db7-9f8c-b7ecf77f347a", "time": 1739850434}
+{"event": "command_add", "properties": {}, "user_id": "bc085b07-edb2-4db7-9f8c-b7ecf77f347a", "time": 1739850465}
+{"event": "command_add", "properties": {}, "user_id": "bc085b07-edb2-4db7-9f8c-b7ecf77f347a", "time": 1739850475}
+{"event": "command_add", "properties": {}, "user_id": "bc085b07-edb2-4db7-9f8c-b7ecf77f347a", "time": 1739850482}
+{"event": "command_tokens", "properties": {}, "user_id": "bc085b07-edb2-4db7-9f8c-b7ecf77f347a", "time": 1739850484}
+{"event": "message_send_starting", "properties": {}, "user_id": "bc085b07-edb2-4db7-9f8c-b7ecf77f347a", "time": 1739850563}
+{"event": "message_send_starting", "properties": {}, "user_id": "bc085b07-edb2-4db7-9f8c-b7ecf77f347a", "time": 1739850790}
+{"event": "exit", "properties": {"reason": "Control-C"}, "user_id": "bc085b07-edb2-4db7-9f8c-b7ecf77f347a", "time": 1739850794}
