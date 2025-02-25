@@ -4,7 +4,7 @@
 **Status**: Implementation Guide  
 **References**: [05-adr-ast-llm-integration.md](./05-adr-ast-llm-integration.md), [06-ast-llm-integration-evaluation.md](./06-ast-llm-integration-evaluation.md)
 
-This document provides a complete implementation guide for the AST-LLM integration project. It's designed to be followed sequentially by an AI agent, with each section building on the previous ones. The implementation is structured into 4 major phases with clear deliverables.
+This document provides a complete implementation guide for the AST-LLM integration project. It's designed to be followed sequentially by an AI agent, with each section building on the previous ones. The implementation is structured into phases with clear deliverables.
 
 ## Phase 0: Preparation and Dependencies
 
@@ -1716,11 +1716,7 @@ case "modify_function_body": {
     const absolutePath = path.resolve(cwd, filePath)
 
     if (!await fileExistsAtPath(absolutePath)) {
-      throw AstErrorHandler.createError(
-        AstErrorCode.GENERAL_ERROR,
-        `File does not exist: ${filePath}`,
-        { filepath: filePath }
-      )
+      throw new Error(`File does not exist: ${filePath}`)
     }
 
     const originalContent = await fs.readFile(absolutePath, "utf-8")
@@ -1950,3 +1946,5 @@ context.subscriptions.push(vscode.commands.registerCommand("roo-cline.showAstDoc
 This comprehensive implementation guide now covers the full spectrum of software development scenarios using LLM agents. By implementing all these services, the system will be capable of handling virtually any code manipulation task with surgical precision while maintaining code integrity through advanced AST understanding.
 
 The implementation balances immediate functionality needs with extensibility for future enhancements, ensuring the system can grow to accommodate new language features and development paradigms.
+
+When fully implemented, this system will enable LLMs to perform precise code edits, thorough code analysis, and complex refactorings across a wide range of programming languages while maintaining the integrity and semantic meaning of the code.
