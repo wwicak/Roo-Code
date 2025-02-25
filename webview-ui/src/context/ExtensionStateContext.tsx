@@ -79,7 +79,6 @@ export interface ExtensionStateContextType extends ExtensionState {
 	setEnhancementApiConfigId: (value: string) => void
 	setExperimentEnabled: (id: ExperimentId, enabled: boolean) => void
 	setAutoApprovalEnabled: (value: boolean) => void
-	handleInputChange: (field: keyof ApiConfiguration, softUpdate?: boolean) => (event: any) => void
 	customModes: ModeConfig[]
 	setCustomModes: (value: ModeConfig[]) => void
 	setMaxOpenTabsContext: (value: number) => void
@@ -158,35 +157,6 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 			return currentState // No state update needed
 		})
 	}, [])
-
-	const handleInputChange = useCallback(
-		// Returns a function that handles an input change event for a specific API configuration field.
-		// The optional "softUpdate" flag determines whether to immediately update local state or send an external update.
-		(field: keyof ApiConfiguration, softUpdate?: boolean) => (event: any) => {
-			// Use the functional form of setState to ensure the latest state is used in the update logic.
-			setState((currentState) => {
-				if (softUpdate) {
-					// Return a new state object with the updated apiConfiguration.
-					// This will trigger a re-render with the new configuration value.
-					return {
-						...currentState,
-						apiConfiguration: { ...currentState.apiConfiguration, [field]: event.target.value },
-					}
-				} else {
-					// For non-soft updates, send a message to the VS Code extension with the updated config.
-					// This side effect communicates the change without updating local React state.
-					vscode.postMessage({
-						type: "upsertApiConfiguration",
-						text: currentState.currentApiConfigName,
-						apiConfiguration: { ...currentState.apiConfiguration, [field]: event.target.value },
-					})
-					// Return the unchanged state as no local state update is intended in this branch.
-					return currentState
-				}
-			})
-		},
-		[],
-	)
 
 	const handleMessage = useCallback(
 		(event: MessageEvent) => {
@@ -312,7 +282,10 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		setApiConfiguration: (value) =>
 			setState((prevState) => ({
 				...prevState,
-				apiConfiguration: value,
+				apiConfiguration: {
+					...prevState.apiConfiguration,
+					...value,
+				},
 			})),
 		setCustomInstructions: (value) => setState((prevState) => ({ ...prevState, customInstructions: value })),
 		setAlwaysAllowReadOnly: (value) => setState((prevState) => ({ ...prevState, alwaysAllowReadOnly: value })),
@@ -350,7 +323,6 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		setEnhancementApiConfigId: (value) =>
 			setState((prevState) => ({ ...prevState, enhancementApiConfigId: value })),
 		setAutoApprovalEnabled: (value) => setState((prevState) => ({ ...prevState, autoApprovalEnabled: value })),
-		handleInputChange,
 		setCustomModes: (value) => setState((prevState) => ({ ...prevState, customModes: value })),
 		setMaxOpenTabsContext: (value) => setState((prevState) => ({ ...prevState, maxOpenTabsContext: value })),
 	}

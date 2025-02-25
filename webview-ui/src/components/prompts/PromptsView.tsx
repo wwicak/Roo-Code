@@ -9,6 +9,19 @@ import {
 	VSCodeRadioGroup,
 	VSCodeRadio,
 } from "@vscode/webview-ui-toolkit/react"
+import { CaretSortIcon, CheckIcon } from "@radix-ui/react-icons"
+import {
+	Button,
+	Command,
+	CommandGroup,
+	CommandInput,
+	CommandItem,
+	CommandList,
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/components/ui"
+import { cn } from "@/lib/utils"
 import { useExtensionState } from "../../context/ExtensionStateContext"
 import {
 	Mode,
@@ -19,6 +32,7 @@ import {
 	ModeConfig,
 	GroupEntry,
 } from "../../../../src/shared/modes"
+import { CustomModeSchema } from "../../../../src/core/config/CustomModesSchema"
 import {
 	supportPrompt,
 	SupportPromptType,
@@ -65,6 +79,9 @@ const PromptsView = ({ onDone }: PromptsViewProps) => {
 	const [testPrompt, setTestPrompt] = useState("")
 	const [isEnhancing, setIsEnhancing] = useState(false)
 	const [isDialogOpen, setIsDialogOpen] = useState(false)
+	const [open, setOpen] = useState(false)
+	const [isCustomLanguage, setIsCustomLanguage] = useState(false)
+	const [customLanguage, setCustomLanguage] = useState("")
 	const [selectedPromptContent, setSelectedPromptContent] = useState("")
 	const [selectedPromptTitle, setSelectedPromptTitle] = useState("")
 	const [isToolsEditMode, setIsToolsEditMode] = useState(false)
@@ -157,15 +174,34 @@ const PromptsView = ({ onDone }: PromptsViewProps) => {
 	const [newModeGroups, setNewModeGroups] = useState<GroupEntry[]>(availableGroups)
 	const [newModeSource, setNewModeSource] = useState<ModeSource>("global")
 
+	// Field-specific error states
+	const [nameError, setNameError] = useState<string>("")
+	const [slugError, setSlugError] = useState<string>("")
+	const [roleDefinitionError, setRoleDefinitionError] = useState<string>("")
+	const [groupsError, setGroupsError] = useState<string>("")
+
+	// Helper to reset form state
+	const resetFormState = useCallback(() => {
+		// Reset form fields
+		setNewModeName("")
+		setNewModeSlug("")
+		setNewModeGroups(availableGroups)
+		setNewModeRoleDefinition("")
+		setNewModeCustomInstructions("")
+		setNewModeSource("global")
+		// Reset error states
+		setNameError("")
+		setSlugError("")
+		setRoleDefinitionError("")
+		setGroupsError("")
+	}, [])
+
 	// Reset form fields when dialog opens
 	useEffect(() => {
 		if (isCreateModeDialogOpen) {
-			setNewModeGroups(availableGroups)
-			setNewModeRoleDefinition("")
-			setNewModeCustomInstructions("")
-			setNewModeSource("global")
+			resetFormState()
 		}
-	}, [isCreateModeDialogOpen])
+	}, [isCreateModeDialogOpen, resetFormState])
 
 	// Helper function to generate a unique slug from a name
 	const generateSlug = useCallback((name: string, attempt = 0): string => {
@@ -186,26 +222,52 @@ const PromptsView = ({ onDone }: PromptsViewProps) => {
 	)
 
 	const handleCreateMode = useCallback(() => {
-		if (!newModeName.trim() || !newModeSlug.trim()) return
+		// Clear previous errors
+		setNameError("")
+		setSlugError("")
+		setRoleDefinitionError("")
+		setGroupsError("")
 
 		const source = newModeSource
 		const newMode: ModeConfig = {
 			slug: newModeSlug,
 			name: newModeName,
-			roleDefinition: newModeRoleDefinition.trim() || "",
+			roleDefinition: newModeRoleDefinition.trim(),
 			customInstructions: newModeCustomInstructions.trim() || undefined,
 			groups: newModeGroups,
 			source,
 		}
+
+		// Validate the mode against the schema
+		const result = CustomModeSchema.safeParse(newMode)
+		if (!result.success) {
+			// Map Zod errors to specific fields
+			result.error.errors.forEach((error) => {
+				const field = error.path[0] as string
+				const message = error.message
+
+				switch (field) {
+					case "name":
+						setNameError(message)
+						break
+					case "slug":
+						setSlugError(message)
+						break
+					case "roleDefinition":
+						setRoleDefinitionError(message)
+						break
+					case "groups":
+						setGroupsError(message)
+						break
+				}
+			})
+			return
+		}
+
 		updateCustomMode(newModeSlug, newMode)
 		switchMode(newModeSlug)
 		setIsCreateModeDialogOpen(false)
-		setNewModeName("")
-		setNewModeSlug("")
-		setNewModeRoleDefinition("")
-		setNewModeCustomInstructions("")
-		setNewModeGroups(availableGroups)
-		setNewModeSource("global")
+		resetFormState()
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [
 		newModeName,
@@ -353,37 +415,88 @@ const PromptsView = ({ onDone }: PromptsViewProps) => {
 				<div className="pb-5 border-b border-vscode-input-border">
 					<div className="mb-5">
 						<div className="font-bold mb-1">Preferred Language</div>
-						<select
-							value={preferredLanguage}
-							onChange={(e) => {
-								setPreferredLanguage(e.target.value)
-								vscode.postMessage({
-									type: "preferredLanguage",
-									text: e.target.value,
-								})
-							}}
-							className="w-full px-2 py-1 h-7 bg-vscode-input-background text-vscode-input-foreground border border-vscode-input-border rounded">
-							<option value="English">English</option>
-							<option value="Arabic">Arabic - العربية</option>
-							<option value="Brazilian Portuguese">Portuguese - Português (Brasil)</option>
-							<option value="Czech">Czech - Čeština</option>
-							<option value="French">French - Français</option>
-							<option value="German">German - Deutsch</option>
-							<option value="Hindi">Hindi - हिन्दी</option>
-							<option value="Hungarian">Hungarian - Magyar</option>
-							<option value="Italian">Italian - Italiano</option>
-							<option value="Japanese">Japanese - 日本語</option>
-							<option value="Korean">Korean - 한국어</option>
-							<option value="Polish">Polish - Polski</option>
-							<option value="Portuguese">Portuguese - Português (Portugal)</option>
-							<option value="Russian">Russian - Русский</option>
-							<option value="Simplified Chinese">Simplified Chinese - 简体中文</option>
-							<option value="Spanish">Spanish - Español</option>
-							<option value="Traditional Chinese">Traditional Chinese - 繁體中文</option>
-							<option value="Turkish">Turkish - Türkçe</option>
-						</select>
+						<Popover open={open} onOpenChange={setOpen}>
+							<PopoverTrigger asChild>
+								<Button
+									variant="combobox"
+									role="combobox"
+									aria-expanded={open}
+									className="w-full justify-between">
+									{preferredLanguage ?? "Select language..."}
+									<CaretSortIcon className="opacity-50" />
+								</Button>
+							</PopoverTrigger>
+							<PopoverContent align="start" className="p-0">
+								<Command>
+									<CommandInput placeholder="Search language..." className="h-9" />
+									<CommandList>
+										<CommandGroup>
+											{[
+												{ value: "English", label: "English" },
+												{ value: "Arabic", label: "Arabic - العربية" },
+												{
+													value: "Brazilian Portuguese",
+													label: "Portuguese - Português (Brasil)",
+												},
+												{ value: "Catalan", label: "Catalan - Català" },
+												{ value: "Czech", label: "Czech - Čeština" },
+												{ value: "French", label: "French - Français" },
+												{ value: "German", label: "German - Deutsch" },
+												{ value: "Hindi", label: "Hindi - हिन्दी" },
+												{ value: "Hungarian", label: "Hungarian - Magyar" },
+												{ value: "Italian", label: "Italian - Italiano" },
+												{ value: "Japanese", label: "Japanese - 日本語" },
+												{ value: "Korean", label: "Korean - 한국어" },
+												{ value: "Polish", label: "Polish - Polski" },
+												{ value: "Portuguese", label: "Portuguese - Português (Portugal)" },
+												{ value: "Russian", label: "Russian - Русский" },
+												{ value: "Simplified Chinese", label: "Simplified Chinese - 简体中文" },
+												{ value: "Spanish", label: "Spanish - Español" },
+												{
+													value: "Traditional Chinese",
+													label: "Traditional Chinese - 繁體中文",
+												},
+												{ value: "Turkish", label: "Turkish - Türkçe" },
+											].map((language) => (
+												<CommandItem
+													key={language.value}
+													value={language.value}
+													onSelect={(value) => {
+														setPreferredLanguage(value)
+														vscode.postMessage({
+															type: "preferredLanguage",
+															text: value,
+														})
+														setOpen(false)
+													}}>
+													{language.label}
+													<CheckIcon
+														className={cn(
+															"ml-auto",
+															preferredLanguage === language.value
+																? "opacity-100"
+																: "opacity-0",
+														)}
+													/>
+												</CommandItem>
+											))}
+										</CommandGroup>
+									</CommandList>
+								</Command>
+								<div className="border-t border-[var(--vscode-input-border)]">
+									<button
+										className="w-full px-2 py-1.5 text-sm text-left hover:bg-[var(--vscode-list-hoverBackground)]"
+										onClick={() => {
+											setIsCustomLanguage(true)
+											setOpen(false)
+										}}>
+										+ Choose another language
+									</button>
+								</div>
+							</PopoverContent>
+						</Popover>
 						<p className="text-xs mt-1.5 text-vscode-descriptionForeground">
-							Select the language that Cline should use for communication.
+							Select the language that Roo should use for communication.
 						</p>
 					</div>
 
@@ -431,7 +544,7 @@ const PromptsView = ({ onDone }: PromptsViewProps) => {
 
 				<div className="mt-5">
 					<div onClick={(e) => e.stopPropagation()} className="flex justify-between items-center mb-3">
-						<h3 className="text-vscode-foreground m-0">Mode-Specific Prompts</h3>
+						<h3 className="text-vscode-foreground m-0">Modes</h3>
 						<div className="flex gap-2">
 							<VSCodeButton appearance="icon" onClick={openCreateModeDialog} title="Create new mode">
 								<span className="codicon codicon-add"></span>
@@ -727,7 +840,7 @@ const PromptsView = ({ onDone }: PromptsViewProps) => {
 								alignItems: "center",
 								marginBottom: "4px",
 							}}>
-							<div style={{ fontWeight: "bold" }}>Mode-specific Custom Instructions</div>
+							<div style={{ fontWeight: "bold" }}>Mode-specific Custom Instructions (optional)</div>
 							{!findModeBySlug(mode, customModes) && (
 								<VSCodeButton
 									appearance="icon"
@@ -846,10 +959,13 @@ const PromptsView = ({ onDone }: PromptsViewProps) => {
 							appearance="icon"
 							title="Copy system prompt to clipboard"
 							onClick={() => {
-								vscode.postMessage({
-									type: "copySystemPrompt",
-									text: selectedPromptContent,
-								})
+								const currentMode = getCurrentMode()
+								if (currentMode) {
+									vscode.postMessage({
+										type: "copySystemPrompt",
+										mode: currentMode.slug,
+									})
+								}
 							}}
 							data-testid="copy-prompt-button">
 							<span className="codicon codicon-copy"></span>
@@ -1069,6 +1185,9 @@ const PromptsView = ({ onDone }: PromptsViewProps) => {
 									}}
 									style={{ width: "100%" }}
 								/>
+								{nameError && (
+									<div className="text-xs text-vscode-errorForeground mt-1">{nameError}</div>
+								)}
 							</div>
 							<div style={{ marginBottom: "16px" }}>
 								<div style={{ fontWeight: "bold", marginBottom: "4px" }}>Slug</div>
@@ -1091,6 +1210,9 @@ const PromptsView = ({ onDone }: PromptsViewProps) => {
 									The slug is used in URLs and file names. It should be lowercase and contain only
 									letters, numbers, and hyphens.
 								</div>
+								{slugError && (
+									<div className="text-xs text-vscode-errorForeground mt-1">{slugError}</div>
+								)}
 							</div>
 							<div style={{ marginBottom: "16px" }}>
 								<div style={{ fontWeight: "bold", marginBottom: "4px" }}>Save Location</div>
@@ -1147,6 +1269,11 @@ const PromptsView = ({ onDone }: PromptsViewProps) => {
 									resize="vertical"
 									style={{ width: "100%" }}
 								/>
+								{roleDefinitionError && (
+									<div className="text-xs text-vscode-errorForeground mt-1">
+										{roleDefinitionError}
+									</div>
+								)}
 							</div>
 							<div style={{ marginBottom: "16px" }}>
 								<div style={{ fontWeight: "bold", marginBottom: "4px" }}>Available Tools</div>
@@ -1184,9 +1311,14 @@ const PromptsView = ({ onDone }: PromptsViewProps) => {
 										</VSCodeCheckbox>
 									))}
 								</div>
+								{groupsError && (
+									<div className="text-xs text-vscode-errorForeground mt-1">{groupsError}</div>
+								)}
 							</div>
 							<div style={{ marginBottom: "16px" }}>
-								<div style={{ fontWeight: "bold", marginBottom: "4px" }}>Custom Instructions</div>
+								<div style={{ fontWeight: "bold", marginBottom: "4px" }}>
+									Custom Instructions (optional)
+								</div>
 								<div
 									style={{
 										fontSize: "13px",
@@ -1219,10 +1351,7 @@ const PromptsView = ({ onDone }: PromptsViewProps) => {
 								backgroundColor: "var(--vscode-editor-background)",
 							}}>
 							<VSCodeButton onClick={() => setIsCreateModeDialogOpen(false)}>Cancel</VSCodeButton>
-							<VSCodeButton
-								appearance="primary"
-								onClick={handleCreateMode}
-								disabled={!newModeName.trim() || !newModeSlug.trim()}>
+							<VSCodeButton appearance="primary" onClick={handleCreateMode}>
 								Create Mode
 							</VSCodeButton>
 						</div>
@@ -1292,6 +1421,40 @@ const PromptsView = ({ onDone }: PromptsViewProps) => {
 								backgroundColor: "var(--vscode-editor-background)",
 							}}>
 							<VSCodeButton onClick={() => setIsDialogOpen(false)}>Close</VSCodeButton>
+						</div>
+					</div>
+				</div>
+			)}
+			{isCustomLanguage && (
+				<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+					<div className="bg-[var(--vscode-editor-background)] p-6 rounded-lg w-96">
+						<h3 className="text-lg font-semibold mb-4">Add Custom Language</h3>
+						<input
+							type="text"
+							className="w-full p-2 mb-4 bg-[var(--vscode-input-background)] text-[var(--vscode-input-foreground)] border border-[var(--vscode-input-border)] rounded"
+							placeholder="Enter language name"
+							value={customLanguage}
+							onChange={(e) => setCustomLanguage(e.target.value)}
+						/>
+						<div className="flex justify-end gap-2">
+							<Button variant="secondary" onClick={() => setIsCustomLanguage(false)}>
+								Cancel
+							</Button>
+							<Button
+								onClick={() => {
+									if (customLanguage.trim()) {
+										setPreferredLanguage(customLanguage.trim())
+										vscode.postMessage({
+											type: "preferredLanguage",
+											text: customLanguage.trim(),
+										})
+										setIsCustomLanguage(false)
+										setCustomLanguage("")
+									}
+								}}
+								disabled={!customLanguage.trim()}>
+								Add
+							</Button>
 						</div>
 					</div>
 				</div>
