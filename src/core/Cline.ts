@@ -1,6 +1,7 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import { NebiusEmbeddingService } from "../services/embedding/NebiusEmbeddingService"
-import { getFunctionModifications } from "./diff/strategies/new-unified/ast-diff"
+import { getFunctionModifications, reconstructContentWithModifiedFunction } from "./diff/strategies/ast-diff-enhanced"
+import { ClineAstIntegration } from "./ast/ClineAstIntegration"
 import cloneDeep from "clone-deep"
 import { DiffStrategy, getDiffStrategy, UnifiedDiffStrategy } from "./diff/DiffStrategy"
 import { validateToolUse, isToolAllowedForMode, ToolName } from "./mode-validator"
@@ -17,6 +18,7 @@ import { ApiStream } from "../api/transform/stream"
 import { DIFF_VIEW_URI_SCHEME, DiffViewProvider } from "../integrations/editor/DiffViewProvider"
 import { CheckpointService, CheckpointServiceFactory } from "../services/checkpoints"
 import { findToolName, formatContentBlockToMarkdown } from "../integrations/misc/export-markdown"
+import { logger } from "../utils/logging"
 import {
 	extractTextFromFile,
 	addLineNumbers,
@@ -93,6 +95,7 @@ export class Cline {
 	readonly taskId: string
 	api: ApiHandler
 	private embeddingService: NebiusEmbeddingService
+	private astIntegration: ClineAstIntegration
 	private terminalManager: TerminalManager
 	private urlContentFetcher: UrlContentFetcher
 	private browserSession: BrowserSession
@@ -158,6 +161,17 @@ export class Cline {
 		this.embeddingService = new NebiusEmbeddingService(
 			"eyJhbGciOiJIUzI1NiIsImtpZCI6IlV6SXJWd1h0dnprLVRvdzlLZWstc0M1akptWXBvX1VaVkxUZlpnMDRlOFUiLCJ0eXAiOiJKV1QifQ.eyJzdWIiOiJnb29nbGUtb2F1dGgyfDEwNTc0NDkwNDMzOTc4MDE2NjkyMiIsInNjb3BlIjoib3BlbmlkIG9mZmxpbmVfYWNjZXNzIiwiaXNzIjoiYXBpX2tleV9pc3N1ZXIiLCJhdWQiOlsiaHR0cHM6Ly9uZWJpdXMtaW5mZXJlbmNlLmV1LmF1dGgwLmNvbS9hcGkvdjIvIl0sImV4cCI6MTg5NzI4Mjg0MiwidXVpZCI6IjA0NjYxNDhjLTJkYzEtNGEzMy1hOTU1LTM2MDUxMzg0NzVlNSIsIm5hbWUiOiJkaWZmIiwiZXhwaXJlc19hdCI6IjIwMzAtMDItMTRUMDc6MDA6NDIrMDAwMCJ9.VCOD4QfxwPhiHqlFFXps2dZwjap0iGf3lyaK_GjpGBU",
 		)
+
+		// Initialize AST integration with configuration
+		this.astIntegration = new ClineAstIntegration({
+			embeddingApiKey:
+				"eyJhbGciOiJIUzI1NiIsImtpZCI6IlV6SXJWd1h0dnprLVRvdzlLZWstc0M1akptWXBvX1VaVkxUZlpnMDRlOFUiLCJ0eXAiOiJKV1QifQ.eyJzdWIiOiJnb29nbGUtb2F1dGgyfDEwNTc0NDkwNDMzOTc4MDE2NjkyMiIsInNjb3BlIjoib3BlbmlkIG9mZmxpbmVfYWNjZXNzIiwiaXNzIjoiYXBpX2tleV9pc3N1ZXIiLCJhdWQiOlsiaHR0cHM6Ly9uZWJpdXMtaW5mZXJlbmNlLmV1LmF1dGgwLmNvbS9hcGkvdjIvIl0sImV4cCI6MTg5NzI4Mjg0MiwidXVpZCI6IjA0NjYxNDhjLTJkYzEtNGEzMy1hOTU1LTM2MDUxMzg0NzVlNSIsIm5hbWUiOiJkaWZmIiwiZXhwaXJlc19hdCI6IjIwMzAtMDItMTRUMDc6MDA6NDIrMDAwMCJ9.VCOD4QfxwPhiHqlFFXps2dZwjap0iGf3lyaK_GjpGBU",
+			maxBackupsPerFile: 10,
+			semanticThreshold: 0.85,
+			structuralThreshold: 0.7,
+			enableAstCaching: true,
+		})
+
 		this.terminalManager = new TerminalManager()
 		this.urlContentFetcher = new UrlContentFetcher(provider.context)
 		this.browserSession = new BrowserSession(provider.context)
@@ -174,6 +188,11 @@ export class Cline {
 
 		// Initialize diffStrategy based on current state
 		this.updateDiffStrategy(Experiments.isEnabled(experiments ?? {}, EXPERIMENT_IDS.DIFF_STRATEGY))
+
+		// Initialize AST integration services
+		this.astIntegration.initialize().catch((error) => {
+			logger.error("Failed to initialize AST Integration:", error)
+		})
 
 		if (startTask) {
 			if (task || images) {
@@ -1333,40 +1352,56 @@ export class Cline {
 							break
 						}
 
-						const oldContent = await fs.readFile(absolutePath, "utf-8")
-						const newContent = oldContent // We'll update this with AST changes
-
-						const modifications = await getFunctionModifications(
-							oldContent,
-							newContent,
-							relPath,
-							this.embeddingService,
-						)
-
-						if (!modifications) {
-							this.consecutiveMistakeCount++
-							pushToolResult(formatResponse.toolError("No supported modifications found"))
-							break
-						}
-
 						this.consecutiveMistakeCount = 0
 
 						try {
+							// Use the AST integration to modify the function body
+							const result = await this.astIntegration.modifyFunctionBody(
+								cwd,
+								relPath,
+								functionId,
+								newBody,
+							)
+
+							if (!result.success) {
+								pushToolResult(formatResponse.toolError(result.message))
+								break
+							}
+
+							// Read the file after modification for the diff view
+							const oldContent = await fs.readFile(absolutePath, "utf-8")
+
+							// Reconstruct content to show in diff view
+							const reconstructedContent = await reconstructContentWithModifiedFunction(
+								oldContent,
+								functionId,
+								newBody,
+								relPath,
+							)
+
+							if (!reconstructedContent) {
+								pushToolResult(formatResponse.toolError(`Failed to reconstruct content for diff view.`))
+								break
+							}
+
 							// Show the modifications in the diff view
 							this.diffViewProvider.editType = "modify"
 							await this.diffViewProvider.open(relPath)
-							await this.diffViewProvider.update(newContent, true)
+							await this.diffViewProvider.update(reconstructedContent, true)
 							await this.diffViewProvider.scrollToFirstDiff()
 
 							const completeMessage = JSON.stringify({
 								tool: "editedExistingFile",
 								path: getReadablePath(cwd, relPath),
-								diff: formatResponse.createPrettyPatch(relPath, oldContent, newContent),
+								diff: formatResponse.createPrettyPatch(relPath, oldContent, reconstructedContent),
 							})
 
 							const didApprove = await askApproval("tool", completeMessage)
 							if (!didApprove) {
 								await this.diffViewProvider.revertChanges()
+
+								// Rollback any changes made by the integration
+								await this.astIntegration.rollbackChange(relPath)
 								break
 							}
 
@@ -1399,12 +1434,11 @@ export class Cline {
 								)
 							}
 							await this.diffViewProvider.reset()
-							break
 						} catch (error) {
 							await handleError("modifying function", error)
 							await this.diffViewProvider.reset()
-							break
 						}
+						break
 					}
 
 					case "write_to_file": {
