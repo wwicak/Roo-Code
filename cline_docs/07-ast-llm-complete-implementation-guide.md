@@ -1688,7 +1688,27 @@ import { AstRollbackManager } from "./ast/AstRollbackManager"
 
 // Update the modify_function_body handler
 case "modify_function_body": {
-  // ... existing code
+  const params = toolUse.input as {
+    path: string
+    function_identifier: string
+    new_body: string
+  }
+
+  // Validate parameters
+  if (!params.path || !params.function_identifier || !params.new_body) {
+    // Handle missing parameters
+    const toolResultBlock: Anthropic.Messages.ToolResultBlockParam = {
+      type: "tool_result",
+      tool_use_id: toolUse.id,
+      content: [{
+        type: "text",
+        text: "Error: Missing required parameters for modify_function_body."
+      }],
+      is_error: true,
+    }
+    toolResultBlocks.push(toolResultBlock)
+    continue
+  }
 
   try {
     // 1. Get the file path and original content
@@ -1901,40 +1921,32 @@ Update extension.ts to register the new command:
 context.subscriptions.push(vscode.commands.registerCommand("roo-cline.showAstDocumentation", showAstDocumentation))
 ```
 
-## Implementation Sequence and Testing
+### 5.5 Comprehensive Tool Integration Reference Table
 
-### Recommended Implementation Order
+| Development Task       | LLM Action                      | Core Service                               | Function Call            |
+| ---------------------- | ------------------------------- | ------------------------------------------ | ------------------------ |
+| Feature implementation | Parse context, generate code    | `CodeGenerator`                            | `generateFile()`         |
+| Bug fixing             | Analyze error, propose fix      | `BugFixService`                            | `generateFixProposals()` |
+| Refactoring            | Parse structure, transform code | `RefactoringService`                       | `executeRefactoring()`   |
+| Test creation          | Generate test cases             | `TestGenerationService`                    | `generateTestFile()`     |
+| Function editing       | Parse AST, modify body          | `reconstructContentWithModifiedFunction()` | `modify_function_body`   |
+| Project migration      | Analyze dependencies, update    | `ProjectAnalysisService`                   | `migrateCode()`          |
+| Cross-file changes     | Track references, update all    | `SymbolDatabase`                           | `getRelatedFiles()`      |
+| Code staleness         | Detect file changes             | `StalenessManager`                         | `isFileStale()`          |
 
-1. Start with Phase 0: Ensure dependencies and create utility helpers
-2. Implement Phase 1: Core AST services
-3. Implement Phase 2: Enhanced AST diff implementation
-4. Implement Phase 3: Integration with Cline.ts
-5. Implement Phase 4: Testing and validation
-6. Finish with Phase 5: Documentation and finalization
+## Implementation Sequence
 
-### Testing Strategy
-
-1. **Unit Tests**: Test each component in isolation
-2. **Integration Tests**: Test components working together
-3. **Manual Testing**: Test the full workflow with different file types
-4. **Edge Cases**: Test with:
-    - Large files
-    - Complex functions
-    - Multiple languages
-    - Syntax errors
-    - Edge case function structures
-
-### Validation Criteria
-
-The implementation should:
-
-1. Successfully parse code files into ASTs
-2. Correctly identify and modify function bodies
-3. Validate structural and semantic correctness
-4. Properly handle errors and roll back changes when needed
-5. Maintain performance with caching
-6. Support multiple programming languages
+1. Start with Phase 0-5 as described earlier
+2. Implement Staleness Management (Section 6.6) first - critical for reliable operation
+3. Add Code Creation capabilities (Section 6.1)
+4. Implement Debugging and Bug Fix (Section 6.3)
+5. Add Test Generation (Section 6.4)
+6. Implement Cross-File Refactoring (Section 6.2)
+7. Add Project Analysis (Section 6.5)
+8. Finally, integrate all with Cline.ts (Section 6.7)
 
 ## Conclusion
 
-This implementation guide covers the complete AST-LLM integration as described in the design documents. By following this guide, you will create a robust AST-based code understanding and editing system that enhances the extension's ability to make precise, structure-aware code modifications.
+This comprehensive implementation guide now covers the full spectrum of software development scenarios using LLM agents. By implementing all these services, the system will be capable of handling virtually any code manipulation task with surgical precision while maintaining code integrity through advanced AST understanding.
+
+The implementation balances immediate functionality needs with extensibility for future enhancements, ensuring the system can grow to accommodate new language features and development paradigms.
