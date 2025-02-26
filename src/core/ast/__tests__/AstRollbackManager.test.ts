@@ -2,11 +2,13 @@ import { jest } from "@jest/globals"
 import { AstRollbackManager, EditBackup } from "../AstRollbackManager"
 import * as fs from "fs/promises"
 import * as path from "path"
+import { PathLike } from "fs"
+import { FileHandle } from "fs/promises"
 
 // Mock dependencies
 jest.mock("fs/promises")
 jest.mock("path", () => ({
-	...jest.requireActual("path"),
+	...(jest.requireActual("path") as object),
 	resolve: jest.fn().mockImplementation((...args) => args.join("/")),
 }))
 jest.mock("../../../utils/logging", () => ({
@@ -30,22 +32,26 @@ describe("AstRollbackManager", () => {
 
 		// Get a new instance
 		rollbackManager = AstRollbackManager.getInstance()
-		(
-			// Mock fs functions
-			fs.readFile as jest.Mock,
-		).mockImplementation((path) => {
-			if (path.includes("existing.ts")) {
-				return Promise.resolve("function test() { return 'original'; }")
+
+		// Mock fs functions
+		const mockReadFile = jest.fn(async (path: PathLike | FileHandle) => {
+			if (typeof path === "string" && path.includes("existing.ts")) {
+				return "function test() { return 'original'; }"
 			}
 			throw new Error("File not found")
 		})
-		;(fs.writeFile as jest.Mock).mockResolvedValue(undefined)
-		;(fs.access as jest.Mock).mockImplementation((path) => {
-			if (path.includes("existing.ts")) {
-				return Promise.resolve()
+		Object.assign(fs, { readFile: mockReadFile })
+
+		const mockWriteFile = jest.fn(async () => undefined)
+		Object.assign(fs, { writeFile: mockWriteFile })
+
+		const mockAccess = jest.fn(async (path: PathLike | FileHandle) => {
+			if (typeof path === "string" && path.includes("existing.ts")) {
+				return undefined
 			}
 			throw new Error("File not found")
 		})
+		Object.assign(fs, { access: mockAccess })
 	})
 
 	describe("Singleton behavior", () => {
@@ -172,17 +178,10 @@ describe("AstRollbackManager", () => {
 			const absolutePath = "/path/to/existing.ts"
 
 			// Create a backup
-			await rollbackManager
-				.createBackup(
-					filePath,
-					absolutePath,
-					"modify",
-				)
-				(
-					// Mock fs.writeFile to fail
-					fs.writeFile as jest.Mock,
-				)
-				.mockRejectedValueOnce(new Error("Write error"))
+			await rollbackManager.createBackup(filePath, absolutePath, "modify")
+
+			// Mock fs.writeFile to fail
+			;(fs.writeFile as jest.Mock).mockRejectedValueOnce(new Error("Write error") as never)
 
 			const result = await rollbackManager.rollback(filePath)
 
@@ -228,7 +227,7 @@ describe("AstRollbackManager", () => {
 			await rollbackManager.createBackup(filePath2, absolutePath, "operation2")
 
 			// Clear all backups
-			rollbackManager.clearAllBackups()
+			rollbackManager.clearBackups()
 
 			expect(rollbackManager.getBackupInfo(filePath1)).toEqual([])
 			expect(rollbackManager.getBackupInfo(filePath2)).toEqual([])
@@ -248,6 +247,22 @@ describe("AstRollbackManager", () => {
 
 			expect(rollbackManager.getBackupInfo(filePath1)).toEqual([])
 			expect(rollbackManager.getBackupInfo(filePath2).length).toBe(1)
+		})
+	})
+
+	describe("Cleanup", () => {
+		it("should clear all backups", () => {
+			const filePath = "test.ts"
+			const absolutePath = "/path/to/existing.ts"
+
+			// Create some backups first
+			rollbackManager.createBackup(filePath, absolutePath, "operation1")
+			rollbackManager.createBackup(filePath, absolutePath, "operation2")
+
+			// Clear all backups
+			rollbackManager.clearBackups()
+
+			expect(rollbackManager.hasBackups(filePath)).toBe(false)
 		})
 	})
 })
