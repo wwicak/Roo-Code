@@ -29,15 +29,15 @@ describe("SemanticValidator", () => {
 
 		// Setup mock embedding service
 		mockEmbeddingService = {
-			embedText: jest.fn().mockResolvedValue([0.1, 0.2, 0.3]),
-		} as any
+			embedText: jest.fn().mockImplementation(async () => [0.1, 0.2, 0.3]),
+		} as unknown as jest.Mocked<NebiusEmbeddingService>
 
 		// Setup mock AST provider
 		mockAstProvider = {
 			serializeAst: jest.fn(),
-			initialize: jest.fn().mockResolvedValue(undefined),
+			initialize: jest.fn().mockImplementation(async () => {}),
 			parseFile: jest.fn(),
-		} as any
+		} as unknown as jest.Mocked<AstProvider>
 
 		// Mock cosine similarity function
 		;(cosineSimilarity as jest.Mock).mockReturnValue(0.9)
@@ -75,9 +75,13 @@ describe("SemanticValidator", () => {
 
 			const result = await validator.validateChange(original, modified, options)
 
+			if (result.semanticScore !== undefined) {
+				expect(result.semanticScore).toBeLessThan(options.semanticThreshold || 1)
+			} else {
+				fail("Expected semanticScore to be defined")
+			}
 			expect(result.isValid).toBe(false)
 			expect(result.error).toBeDefined()
-			expect(result.semanticScore).toBeLessThan(options.semanticThreshold)
 		})
 
 		it("should skip semantic validation when instructed", async () => {
@@ -132,7 +136,21 @@ describe("SemanticValidator", () => {
 				},
 			} as any)
 
-			const result = await validator.validateFunctionBodyChange(original, modified)
+			const result = await validator.validateFunctionBodyChange(
+				"test.ts",
+				{
+					childForFieldName: (name: string) => {
+						if (name === "body") {
+							return {
+								type: "body",
+								text: original,
+							} as any
+						}
+						return null
+					},
+				},
+				modified,
+			)
 
 			expect(result.isValid).toBe(true)
 			expect(result.message).toContain("valid")
@@ -150,8 +168,38 @@ describe("SemanticValidator", () => {
 				semanticThreshold: 0.8,
 			}
 
-			const result = await validator.validateFunctionBodyChange(original, modified, options)
+			const result = await validator.validateFunctionBodyChange(
+				"test.ts",
+				{
+					type: "function_declaration",
+					children: [
+						{ type: "identifier", text: "test" },
+						{ type: "parameter_list", text: "()" },
+						{
+							type: "body",
+							text: original,
+							children: [{ type: "return_statement", text: "return a + b;" }],
+						},
+					],
+					childForFieldName: (name: string) => {
+						if (name === "body") {
+							return {
+								type: "body",
+								text: original,
+							} as any
+						}
+						return null
+					},
+				},
+				modified,
+				options,
+			)
 
+			if (result.semanticScore !== undefined) {
+				expect(result.semanticScore).toBeLessThan(options.semanticThreshold || 1)
+			} else {
+				fail("Expected semanticScore to be defined")
+			}
 			expect(result.isValid).toBe(false)
 			expect(result.message).toContain("failed")
 		})
@@ -299,7 +347,8 @@ describe("SemanticValidator", () => {
 			}
 
 			// Setup mock for structure detection
-			jest.spyOn(validator as any, "getNodeTypes").mockImplementation((content: string) => {
+			jest.spyOn(validator as any, "getNodeTypes").mockImplementation((...args) => {
+				const content = args[0] as string
 				if (content.includes("This is a comment")) {
 					return ["comment", "function_declaration"]
 				} else {
