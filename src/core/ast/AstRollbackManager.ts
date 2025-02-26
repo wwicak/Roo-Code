@@ -5,7 +5,7 @@ import { logger } from "../../utils/logging"
 /**
  * Interface for an edit backup
  */
-interface EditBackup {
+export interface EditBackup {
 	filePath: string
 	absolutePath: string
 	originalContent: string

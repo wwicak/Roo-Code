@@ -27,7 +27,8 @@ export type AsyncMockType<T> = {
  */
 declare global {
 	namespace jest {
-		interface Mock<T = any, Y extends any[] = any[]> {
+		interface Mock<T = any> {
+			<U extends T>(value: U): jest.Mock<T, any[]>
 			mockResolvedValue(value: T): this
 			mockResolvedValueOnce(value: T): this
 			mockRejectedValue(value: any): this

@@ -76,7 +76,7 @@ export class ClineAstIntegration {
 	private astProvider: AstProvider
 	private rollbackManager: AstRollbackManager
 	private validator: SemanticValidator
-	private embeddingService: NebiusEmbeddingService | null = null
+	private embeddingService: NebiusEmbeddingService
 	private initialized = false
 	private config: Required<ClineAstIntegrationConfig>
 	private cacheManager: AstCacheManager
@@ -118,13 +118,11 @@ export class ClineAstIntegration {
 
 		if (this.config.embeddingApiKey) {
 			this.embeddingService = new NebiusEmbeddingService(this.config.embeddingApiKey)
-			this.validator = new SemanticValidator(
-				this.embeddingService ? this.embeddingService : (undefined as any),
-				this.astProvider,
-			)
+			this.validator = new SemanticValidator(this.config.embeddingApiKey)
 		} else {
 			logger.warn("No embedding API key provided. Semantic validation will be limited.")
-			this.validator = new SemanticValidator(undefined as any, this.astProvider)
+			this.embeddingService = new NebiusEmbeddingService("")
+			this.validator = new SemanticValidator("")
 		}
 
 		// Configure caching
@@ -354,10 +352,7 @@ export class ClineAstIntegration {
 			this.config.embeddingApiKey = config.embeddingApiKey
 			// Recreate services that depend on API key
 			this.embeddingService = new NebiusEmbeddingService(this.config.embeddingApiKey)
-			this.validator = new SemanticValidator(
-				this.embeddingService ? this.embeddingService : (undefined as any),
-				this.astProvider,
-			)
+			this.validator = new SemanticValidator(this.config.embeddingApiKey)
 		}
 
 		if (config.maxBackupsPerFile !== undefined) {
