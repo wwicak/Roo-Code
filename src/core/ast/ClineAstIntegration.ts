@@ -1,9 +1,9 @@
 import * as path from "path"
 import * as fs from "fs/promises"
-import { AstProvider } from "./AstProvider"
+import { AstProvider } from "./AstService"
 import { AstErrorHandler, AstErrorCode, AstError } from "./AstErrorHandler"
 import { AstRollbackManager } from "./AstRollbackManager"
-import { SemanticValidator } from "./validation/SemanticValidator"
+import { SemanticValidator, ValidationOptions } from "./SemanticValidator"
 import { getFunctionModifications, reconstructContentWithModifiedFunction } from "../diff/strategies/ast-diff-enhanced"
 import { logger } from "../../utils/logging"
 import { NebiusEmbeddingService } from "../../services/embedding/NebiusEmbeddingService"
@@ -32,14 +32,19 @@ export interface ModificationResult {
 	success: boolean
 	message: string
 	validationDetails?: string
+	error?: {
+		code: string
+		details?: any
+	}
 }
 
 /**
  * Response interface for backup operations
  */
 export interface BackupInfo {
-	backups: string[]
+	hasBackups: boolean
 	count: number
+	operations: string[]
 }
 
 /**
@@ -113,10 +118,13 @@ export class ClineAstIntegration {
 
 		if (this.config.embeddingApiKey) {
 			this.embeddingService = new NebiusEmbeddingService(this.config.embeddingApiKey)
-			this.validator = new SemanticValidator(this.embeddingService)
+			this.validator = new SemanticValidator(
+				this.embeddingService ? this.embeddingService : (undefined as any),
+				this.astProvider,
+			)
 		} else {
 			logger.warn("No embedding API key provided. Semantic validation will be limited.")
-			this.validator = new SemanticValidator()
+			this.validator = new SemanticValidator(undefined as any, this.astProvider)
 		}
 
 		// Configure caching
@@ -225,8 +233,22 @@ export class ClineAstIntegration {
 				message: `Successfully modified function body for ${functionIdentifier}`,
 			}
 		} catch (error) {
-			// Handle errors
-			const astError = AstErrorHandler.isAstError(error)
+			return this.handleEditError(error, filePath)
+		}
+	}
+
+	/**
+	 * Handle error in the edit process
+	 * @param error Error object
+	 * @param filePath File path where the error occurred
+	 */
+	private async handleEditError(error: any, filePath: string): Promise<ModificationResult> {
+		logger.error(`Failed to edit ${filePath}`, error)
+
+		try {
+			// Check if it's an AST error
+			const isAstError = AstErrorHandler.isAstError(error)
+			const astError = isAstError
 				? error
 				: AstErrorHandler.createError(
 						AstErrorCode.GENERAL_ERROR,
@@ -243,26 +265,32 @@ export class ClineAstIntegration {
 				astError.code === AstErrorCode.SEMANTIC_VALIDATION_FAILED
 			) {
 				const didRollback = await this.rollbackManager.rollback(filePath)
-
-				if (didRollback) {
-					logger.info(`Rolled back changes to ${filePath} due to validation failure`)
-				}
+				logger.info(didRollback ? "Rollback successful" : "Rollback not performed")
 			}
 
+			// Build the error result
 			return {
 				success: false,
 				message: `${fallback.message}${fallback.suggestedAction ? ` ${fallback.suggestedAction}` : ""}`,
-				validationDetails: astError instanceof AstError ? astError.details?.stack : undefined,
+				validationDetails: astError.details?.stack,
+				error: astError,
+			}
+		} catch (e) {
+			// If error handling itself fails, provide a backup error message
+			logger.error("Error during error handling", e)
+			return {
+				success: false,
+				message: `Failed to edit code: ${error instanceof Error ? error.message : String(error)}`,
 			}
 		}
 	}
 
 	/**
-	 * Validate a potential function body change without applying it
-	 * @param filePath Path to the file
-	 * @param functionIdentifier Identifier for the function (name:line)
-	 * @param newBody New function body text
-	 * @param options Optional validation options to override defaults
+	 * Validate a function body change without applying it
+	 * @param filePath Relative path to the file
+	 * @param functionIdentifier Identifier of function to modify
+	 * @param newBody New function body
+	 * @param options Validation options
 	 */
 	public async validateFunctionBodyChange(
 		filePath: string,
@@ -276,51 +304,42 @@ export class ClineAstIntegration {
 		structuralScore?: number
 	}> {
 		try {
-			await this.initialize()
+			// Normalize file path
+			const absolutePath = path.resolve(filePath)
 
-			// Find the node
-			const node = await this.astProvider.getNodeWithIdentifier(filePath, functionIdentifier)
+			// Ensure file exists
+			await fs.access(absolutePath, fs.constants.F_OK)
 
-			if (!node) {
+			// Read original content
+			const originalContent = await fs.readFile(absolutePath, "utf8")
+
+			// Get function node
+			const functionNode = await this.astProvider.getNodeWithIdentifier(absolutePath, functionIdentifier)
+
+			if (!functionNode) {
 				return {
 					isValid: false,
-					message: `Function ${functionIdentifier} not found in ${filePath}`,
+					message: `Could not find function with identifier ${functionIdentifier}`,
 				}
-			}
-
-			// Extract the original code
-			const originalBody = node.childForFieldName("body")?.text || ""
-
-			// Set validation options from config and any overrides
-			const validationOptions: ValidationOptions = {
-				semanticThreshold: this.config.semanticThreshold,
-				structuralThreshold: this.config.structuralThreshold,
-				...options,
 			}
 
 			// Validate the change
-			const validationResult = await this.validator.validateChange(originalBody, newBody, validationOptions)
-
-			if (!validationResult.isValid) {
-				return {
-					isValid: false,
-					message: validationResult.error || "Validation failed",
-					semanticScore: validationResult.semanticScore,
-					structuralScore: validationResult.structuralScore,
-				}
-			}
-
-			return {
-				isValid: true,
-				message: "Function body change is valid",
-				semanticScore: validationResult.semanticScore,
-				structuralScore: validationResult.structuralScore,
+			if (this.embeddingService) {
+				return this.validator.validateFunctionBodyChange(originalContent, functionNode, newBody, options)
+			} else {
+				// If no embedding service, we can only do structural validation
+				return this.validator.validateFunctionBodyChange(originalContent, functionNode, newBody, {
+					...options,
+					skipSemanticValidation: true,
+				})
 			}
 		} catch (error) {
-			logger.error(`Error validating function body change: ${error}`)
+			logger.error("Failed to validate function body change", error)
 			return {
 				isValid: false,
-				message: `Error during validation: ${error instanceof Error ? error.message : String(error)}`,
+				message: `Failed to validate function body change: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
 			}
 		}
 	}
@@ -335,7 +354,10 @@ export class ClineAstIntegration {
 			this.config.embeddingApiKey = config.embeddingApiKey
 			// Recreate services that depend on API key
 			this.embeddingService = new NebiusEmbeddingService(this.config.embeddingApiKey)
-			this.validator = new SemanticValidator(this.config.embeddingApiKey)
+			this.validator = new SemanticValidator(
+				this.embeddingService ? this.embeddingService : (undefined as any),
+				this.astProvider,
+			)
 		}
 
 		if (config.maxBackupsPerFile !== undefined) {
@@ -371,21 +393,30 @@ export class ClineAstIntegration {
 	 * Roll back a previous change
 	 * @param filePath Relative path to the file
 	 */
-	public async rollbackChange(filePath: string): Promise<boolean> {
+	public async rollbackChange(filePath: string): Promise<ModificationResult> {
 		try {
 			const result = await this.rollbackManager.rollback(filePath)
 			if (result) {
 				logger.info(`Successfully rolled back changes to ${filePath}`)
 				// Invalidate cache after rollback
 				this.cacheManager.invalidateFile(filePath)
-				return true
+				return {
+					success: true,
+					message: `Successfully rolled back changes to ${filePath}`,
+				}
 			}
 
 			logger.warn(`No backups found for ${filePath}`)
-			return false
+			return {
+				success: false,
+				message: `Failed to roll back changes to ${filePath} - no backups found`,
+			}
 		} catch (error) {
 			logger.error(`Failed to roll back changes to ${filePath}`, error)
-			return false
+			return {
+				success: false,
+				message: `Failed to roll back changes to ${filePath} - ${error instanceof Error ? error.message : String(error)}`,
+			}
 		}
 	}
 
@@ -393,18 +424,24 @@ export class ClineAstIntegration {
 	 * Get information about backups for a file
 	 * @param filePath Relative path to the file
 	 */
-	public async getBackupInfo(filePath: string): Promise<BackupInfo> {
+	public getBackupInfo(filePath: string): {
+		hasBackups: boolean
+		count: number
+		operations: string[]
+	} {
 		try {
-			const backups = await this.rollbackManager.getBackups(filePath)
+			const backupInfo = this.rollbackManager.getBackupInfo(filePath)
 			return {
-				backups: backups.map((b) => b.timestamp.toISOString()),
-				count: backups.length,
+				hasBackups: backupInfo.length > 0,
+				count: backupInfo.length,
+				operations: backupInfo.map((b) => b.operation),
 			}
 		} catch (error) {
 			logger.error(`Failed to get backup info for ${filePath}`, error)
 			return {
-				backups: [],
+				hasBackups: false,
 				count: 0,
+				operations: [],
 			}
 		}
 	}

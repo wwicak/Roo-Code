@@ -155,6 +155,21 @@ export class AstCacheManager {
 	}
 
 	/**
+	 * Disable caching functionality
+	 */
+	public disableCache(): void {
+		this.clearCache()
+		logger.debug("AST caching disabled")
+	}
+
+	/**
+	 * Enable caching functionality
+	 */
+	public enableCache(): void {
+		logger.debug("AST caching enabled")
+	}
+
+	/**
 	 * Clean up the cache by removing stale entries
 	 */
 	private cleanupCache(): void {

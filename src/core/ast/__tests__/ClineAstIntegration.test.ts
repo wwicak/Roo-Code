@@ -1,19 +1,20 @@
 import * as path from "path"
 import * as fs from "fs/promises"
 import { jest } from "@jest/globals"
+import { AstProvider } from "../AstProvider"
+import { AstRollbackManager, EditBackup } from "../AstRollbackManager"
 import { ClineAstIntegration } from "../ClineAstIntegration"
-import { AstProvider } from "../AstService"
-import { AstRollbackManager } from "../AstRollbackManager"
-import { SemanticValidator } from "../SemanticValidator"
-import { NebiusEmbeddingService } from "../../../services/embedding/NebiusEmbeddingService"
+import { SemanticValidator, ValidationOptions } from "../SemanticValidator"
+import { NebiusEmbeddingService } from "../../../services/nebius/NebiusEmbeddingService"
 import * as astDiffModule from "../../diff/strategies/ast-diff-enhanced"
 import { AstErrorCode } from "../AstErrorHandler"
+import { AsyncMockType, MockType } from "./mockTypes"
 
 // Mock dependencies
-jest.mock("../AstService")
+jest.mock("../AstProvider")
 jest.mock("../AstRollbackManager")
 jest.mock("../SemanticValidator")
-jest.mock("../../../services/embedding/NebiusEmbeddingService")
+jest.mock("../../../services/nebius/NebiusEmbeddingService")
 jest.mock("../../diff/strategies/ast-diff-enhanced")
 jest.mock("fs/promises")
 jest.mock("../../../utils/logging", () => ({
@@ -26,24 +27,38 @@ jest.mock("../../../utils/logging", () => ({
 }))
 
 describe("ClineAstIntegration", () => {
-	// Use any type for mocks to avoid TypeScript errors with Jest mocks
-	const mockAstProvider: any = {
+	// Use the MockType helper for properly typed mocks
+	const mockAstProvider = {
 		initialize: jest.fn().mockResolvedValue(undefined),
 		getNodeWithIdentifier: jest.fn(),
 		getRelatedFiles: jest.fn().mockReturnValue(new Set(["related1.ts", "related2.ts"])),
 		getInstance: jest.fn().mockReturnThis(),
-	}
+	} as unknown as AsyncMockType<AstProvider>
 
-	const mockRollbackManager: any = {
+	const mockRollbackManager = {
 		createBackup: jest.fn().mockResolvedValue(true),
-		rollback: jest.fn(),
-		getBackupInfo: jest.fn(),
+		rollback: jest.fn().mockResolvedValue(true),
+		getBackupInfo: jest.fn().mockReturnValue({
+			filePath: "testFilePath",
+			operation: "modify_function_body",
+			timestamp: Date.now(),
+		}),
 		getInstance: jest.fn().mockReturnThis(),
-	}
+	} as unknown as AsyncMockType<AstRollbackManager>
 
-	const mockSemanticValidator: any = {
-		validateChange: jest.fn(),
-	}
+	const mockSemanticValidator = {
+		validateChange: jest.fn().mockResolvedValue({
+			isValid: true,
+			semanticScore: 0.9,
+			structuralScore: 0.95,
+		}),
+		validateFunctionBodyChange: jest.fn().mockResolvedValue({
+			isValid: true,
+			message: "Valid change",
+			semanticScore: 0.9,
+			structuralScore: 0.95,
+		}),
+	} as unknown as AsyncMockType<SemanticValidator>
 
 	const mockEmbeddingService = {}
 
@@ -62,7 +77,7 @@ describe("ClineAstIntegration", () => {
 		// Reset mocks
 		;(AstProvider.getInstance as jest.Mock).mockReturnValue(mockAstProvider)
 		;(AstRollbackManager.getInstance as jest.Mock).mockReturnValue(mockRollbackManager)
-		;(SemanticValidator as unknown as jest.Mock).mockImplementation(() => mockSemanticValidator)
+		;(SemanticValidator as jest.Mock).mockImplementation(() => mockSemanticValidator)
 		;(NebiusEmbeddingService as unknown as jest.Mock).mockImplementation(() => mockEmbeddingService)
 
 		// Mock fs functions
@@ -93,11 +108,20 @@ describe("ClineAstIntegration", () => {
 			structuralScore: 0.95,
 		})
 
+		mockSemanticValidator.validateFunctionBodyChange.mockResolvedValue({
+			isValid: true,
+			message: "Valid change",
+			semanticScore: 0.9,
+			structuralScore: 0.95,
+		})
+
 		// Setup rollback manager
 		mockRollbackManager.rollback.mockResolvedValue(true)
-		mockRollbackManager.getBackupInfo.mockReturnValue([
-			{ operation: "modify_function_body", timestamp: Date.now() },
-		])
+		mockRollbackManager.getBackupInfo.mockReturnValue({
+			filePath: testFilePath,
+			operation: "modify_function_body",
+			timestamp: Date.now(),
+		})
 	})
 
 	describe("Initialization", () => {
@@ -146,7 +170,7 @@ describe("ClineAstIntegration", () => {
 			const result = await integration.modifyFunctionBody(testCwd, testFilePath, testFunctionId, testNewBody)
 
 			expect(result.success).toBe(false)
-			expect(result.message).toContain("File does not exist")
+			expect(result.message).toContain("File not found")
 			expect(result.error?.code).toBe(AstErrorCode.GENERAL_ERROR)
 		})
 
@@ -275,7 +299,11 @@ describe("ClineAstIntegration", () => {
 		})
 
 		it("should handle no backups", () => {
-			mockRollbackManager.getBackupInfo.mockReturnValueOnce([])
+			mockRollbackManager.getBackupInfo.mockReturnValueOnce({
+				filePath: testFilePath,
+				operation: "",
+				timestamp: Date.now(),
+			})
 
 			const integration = new ClineAstIntegration()
 			const result = integration.getBackupInfo(testFilePath)

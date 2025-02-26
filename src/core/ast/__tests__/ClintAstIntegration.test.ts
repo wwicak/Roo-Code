@@ -1,19 +1,21 @@
 import * as path from "path"
 import * as fs from "fs/promises"
 import { jest } from "@jest/globals"
+import { AstProvider } from "../AstProvider"
+import { AstRollbackManager, EditBackup } from "../AstRollbackManager"
 import { ClineAstIntegration } from "../ClineAstIntegration"
-import { AstProvider } from "../AstService"
-import { AstRollbackManager } from "../AstRollbackManager"
-import { SemanticValidator } from "../SemanticValidator"
-import { NebiusEmbeddingService } from "../../../services/embedding/NebiusEmbeddingService"
+import { SemanticValidator, ValidationOptions } from "../SemanticValidator"
+import { NebiusEmbeddingService } from "../../../services/nebius/NebiusEmbeddingService"
 import * as astDiffModule from "../../diff/strategies/ast-diff-enhanced"
+import { SyntaxNode } from "web-tree-sitter"
+import { AsyncMockType, MockType } from "./mockTypes"
 import { AstErrorCode } from "../AstErrorHandler"
 
 // Mock dependencies
-jest.mock("../AstService")
+jest.mock("../AstProvider")
 jest.mock("../AstRollbackManager")
 jest.mock("../SemanticValidator")
-jest.mock("../../../services/embedding/NebiusEmbeddingService")
+jest.mock("../../../services/nebius/NebiusEmbeddingService")
 jest.mock("../../diff/strategies/ast-diff-enhanced")
 jest.mock("fs/promises")
 jest.mock("../../../utils/logging", () => ({
@@ -26,24 +28,49 @@ jest.mock("../../../utils/logging", () => ({
 }))
 
 describe("ClineAstIntegration", () => {
-	// Use any type for mocks to avoid TypeScript errors with Jest mocks
-	const mockAstProvider: any = {
+	// Use the MockType helper for properly typed mocks
+	const mockAstProvider = {
 		initialize: jest.fn().mockResolvedValue(undefined),
-		getNodeWithIdentifier: jest.fn(),
+		getNodeWithIdentifier: jest.fn().mockResolvedValue({
+			type: "function_declaration",
+			text: "function testFunction() { return 'original'; }",
+			startPosition: { row: 0, column: 0 },
+			endPosition: { row: 10, column: 1 },
+			childForFieldName: (name: string) => {
+				if (name === "body") {
+					return { text: "return 'original';" }
+				}
+				return null
+			},
+		}),
 		getRelatedFiles: jest.fn().mockReturnValue(new Set(["related1.ts", "related2.ts"])),
 		getInstance: jest.fn().mockReturnThis(),
-	}
+	} as unknown as AsyncMockType<AstProvider>
 
-	const mockRollbackManager: any = {
+	const mockRollbackManager = {
 		createBackup: jest.fn().mockResolvedValue(true),
-		rollback: jest.fn(),
-		getBackupInfo: jest.fn(),
+		rollback: jest.fn().mockResolvedValue(true),
+		getBackupInfo: jest.fn().mockReturnValue({
+			filePath: "test.ts",
+			operation: "modify_function_body",
+			timestamp: Date.now(),
+		}),
 		getInstance: jest.fn().mockReturnThis(),
-	}
+	} as unknown as AsyncMockType<AstRollbackManager>
 
-	const mockSemanticValidator: any = {
-		validateChange: jest.fn(),
-	}
+	const mockSemanticValidator = {
+		validateChange: jest.fn().mockResolvedValue({
+			isValid: true,
+			semanticScore: 0.9,
+			structuralScore: 0.95,
+		}),
+		validateFunctionBodyChange: jest.fn().mockResolvedValue({
+			isValid: true,
+			message: "Valid change",
+			semanticScore: 0.9,
+			structuralScore: 0.95,
+		}),
+	} as unknown as AsyncMockType<SemanticValidator>
 
 	const mockEmbeddingService = {}
 
@@ -78,17 +105,22 @@ describe("ClineAstIntegration", () => {
 
 		// Setup node mock for getNodeWithIdentifier
 		mockAstProvider.getNodeWithIdentifier.mockResolvedValue({
+			type: "function_declaration",
+			text: testOriginalContent,
+			startPosition: { row: 0, column: 0 },
+			endPosition: { row: 10, column: 1 },
 			childForFieldName: (name: string) => {
 				if (name === "body") {
-					return { text: "{ return 'original'; }" }
+					return { text: "return 'original';" }
 				}
 				return null
 			},
 		})
 
 		// Setup semantic validator
-		mockSemanticValidator.validateChange.mockResolvedValue({
+		mockSemanticValidator.validateFunctionBodyChange.mockResolvedValue({
 			isValid: true,
+			message: "Valid change",
 			semanticScore: 0.9,
 			structuralScore: 0.95,
 		})
@@ -202,7 +234,7 @@ describe("ClineAstIntegration", () => {
 			const result = await integration.validateFunctionBodyChange(testFilePath, testFunctionId, testNewBody)
 
 			expect(result.isValid).toBe(true)
-			expect(result.message).toBe("Function body change is valid")
+			expect(result.message).toBe("Valid change")
 			expect(result.semanticScore).toBe(0.9)
 			expect(result.structuralScore).toBe(0.95)
 		})
@@ -218,9 +250,9 @@ describe("ClineAstIntegration", () => {
 		})
 
 		it("should return invalid if validation fails", async () => {
-			mockSemanticValidator.validateChange.mockResolvedValueOnce({
+			mockSemanticValidator.validateFunctionBodyChange.mockResolvedValueOnce({
 				isValid: false,
-				error: "Semantic validation failed",
+				message: "Validation failed",
 				semanticScore: 0.3,
 				structuralScore: 0.95,
 			})
@@ -229,7 +261,7 @@ describe("ClineAstIntegration", () => {
 			const result = await integration.validateFunctionBodyChange(testFilePath, testFunctionId, testNewBody)
 
 			expect(result.isValid).toBe(false)
-			expect(result.message).toBe("Semantic validation failed")
+			expect(result.message).toBe("Validation failed")
 			expect(result.semanticScore).toBe(0.3)
 		})
 

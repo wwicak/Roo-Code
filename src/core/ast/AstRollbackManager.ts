@@ -143,7 +143,16 @@ export class AstRollbackManager {
 	}
 
 	/**
-	 * Get information about backups for a file
+	 * Get all backups for a file
+	 * @param filePath Relative path to the file
+	 * @returns Array of EditBackup objects
+	 */
+	public getBackups(filePath: string): EditBackup[] {
+		return this.backups.get(filePath) || []
+	}
+
+	/**
+	 * Get backup information for a file without the content
 	 * @param filePath Relative path to the file
 	 */
 	public getBackupInfo(filePath: string): Array<Omit<EditBackup, "originalContent" | "absolutePath">> {

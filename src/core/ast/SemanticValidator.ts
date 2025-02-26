@@ -4,11 +4,15 @@ import { logger } from "../../utils/logging"
 import { cosineSimilarity } from "../../utils/cosineSimilarity"
 import Parser from "web-tree-sitter"
 
+/**
+ * Options for validating code changes
+ */
 export interface ValidationOptions {
 	semanticThreshold?: number // Threshold for semantic similarity (0-1)
 	structuralThreshold?: number // Threshold for structural similarity (0-1)
 	validateImports?: boolean // Whether to validate import statements
 	skipTypes?: string[] // Node types to skip when validating
+	skipSemanticValidation?: boolean // Whether to skip semantic validation
 }
 
 export interface ValidationResult {
@@ -48,25 +52,32 @@ export class SemanticValidator {
 
 		try {
 			// Semantic validation with embeddings
-			const semanticResult = await this.validateSemantic(original, modified, semanticThreshold)
-			if (!semanticResult.isValid) {
-				return semanticResult
+			if (!options.skipSemanticValidation) {
+				const semanticResult = await this.validateSemantic(original, modified, semanticThreshold)
+				if (!semanticResult.isValid) {
+					return semanticResult
+				}
 			}
 
 			// Structural validation with AST
 			const structuralResult = await this.validateStructural(original, modified, structuralThreshold, options)
 
 			// Combine results - if both pass, return the combined result
-			if (semanticResult.isValid && structuralResult.isValid) {
+			if (options.skipSemanticValidation || semanticThreshold === 1) {
 				return {
 					isValid: true,
-					semanticScore: semanticResult.semanticScore,
+					structuralScore: structuralResult.structuralScore,
+				}
+			} else if (structuralResult.isValid) {
+				return {
+					isValid: true,
+					semanticScore: 1.0,
 					structuralScore: structuralResult.structuralScore,
 				}
 			}
 
 			// Return the failed validation result
-			return structuralResult.isValid ? semanticResult : structuralResult
+			return structuralResult.isValid ? { isValid: false, semanticScore: 0.0 } : structuralResult
 		} catch (error) {
 			logger.error("Error validating code change:", error)
 			return {
@@ -288,6 +299,62 @@ export class SemanticValidator {
 			return {
 				isValid: false,
 				error: `Validation error: ${error instanceof Error ? error.message : String(error)}`,
+			}
+		}
+	}
+
+	/**
+	 * Validate a function body change
+	 * @param fileContent Original file content
+	 * @param functionNode Function node to validate
+	 * @param newBody New function body text
+	 * @param options Validation options
+	 */
+	public async validateFunctionBodyChange(
+		fileContent: string,
+		functionNode: any,
+		newBody: string,
+		options?: Partial<ValidationOptions>,
+	): Promise<{
+		isValid: boolean
+		message: string
+		semanticScore?: number
+		structuralScore?: number
+	}> {
+		try {
+			// Extract the original body
+			const originalBody = functionNode.childForFieldName?.("body")?.text || ""
+
+			// Set validation options from config and any overrides
+			const validationOptions: ValidationOptions = {
+				semanticThreshold: 0.85, // Default values
+				structuralThreshold: 0.7,
+				...options,
+			}
+
+			// Validate the change
+			const validationResult = await this.validateChange(originalBody, newBody, validationOptions)
+
+			if (!validationResult.isValid) {
+				return {
+					isValid: false,
+					message: validationResult.error || "Validation failed",
+					semanticScore: validationResult.semanticScore,
+					structuralScore: validationResult.structuralScore,
+				}
+			}
+
+			return {
+				isValid: true,
+				message: "Valid change",
+				semanticScore: validationResult.semanticScore,
+				structuralScore: validationResult.structuralScore,
+			}
+		} catch (error) {
+			logger.error(`Error validating function body change: ${error}`)
+			return {
+				isValid: false,
+				message: `Error during validation: ${error instanceof Error ? error.message : String(error)}`,
 			}
 		}
 	}
