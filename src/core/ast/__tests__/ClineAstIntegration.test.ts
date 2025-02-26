@@ -1,13 +1,15 @@
 import * as path from "path"
 import * as fs from "fs/promises"
 import { jest } from "@jest/globals"
+import Parser from "web-tree-sitter"
 import { AstProvider } from "../AstService"
-import { AstRollbackManager, EditBackup } from "../AstRollbackManager"
+import { AstRollbackManager } from "../AstRollbackManager"
 import { ClineAstIntegration } from "../ClineAstIntegration"
-import { SemanticValidator, ValidationOptions, ValidationResult } from "../SemanticValidator"
+import { SemanticValidator } from "../SemanticValidator"
 import { NebiusEmbeddingService } from "../../../services/embedding/NebiusEmbeddingService"
 import * as astDiffModule from "../../diff/strategies/ast-diff-enhanced"
 import { AstErrorCode } from "../AstErrorHandler"
+import { ModifyFunctionBodyToolUse } from "../../assistant-message"
 import { MockType, AsyncMockType } from "./mockTypes"
 
 // Mock dependencies
@@ -37,92 +39,105 @@ describe("ClineAstIntegration", () => {
 	const testReconstructedContent = "function testFunction() { return 'modified'; }"
 
 	// Mock objects
-	const mockAstProvider: MockType<AstProvider> = {
-		initialize: jest.fn().mockResolvedValue(undefined),
-		getNodeWithIdentifier: jest.fn(),
-		getRelatedFiles: jest.fn(),
-		getInstance: jest.fn(),
-	}
-
-	const mockRollbackManager: MockType<AstRollbackManager> = {
-		createBackup: jest.fn(),
-		rollback: jest.fn(),
-		getBackupInfo: jest.fn(),
-		getInstance: jest.fn(),
-	}
-
-	const mockSemanticValidator: MockType<SemanticValidator> = {
-		validateChange: jest.fn(),
-		validateFunctionBodyChange: jest.fn(),
-	}
-
-	const mockEmbeddingService: MockType<NebiusEmbeddingService> = {
-		embedText: jest.fn(),
-	}
+	let mockAstProvider: jest.Mocked<AstProvider>
+	let mockRollbackManager: jest.Mocked<AstRollbackManager>
+	let mockSemanticValidator: jest.Mocked<SemanticValidator>
+	let mockEmbeddingService: jest.Mocked<NebiusEmbeddingService>
 
 	beforeEach(() => {
 		jest.clearAllMocks()
 
 		// Setup ast provider
-		;(AstProvider.getInstance as jest.Mock).mockReturnValue(mockAstProvider)
-		mockAstProvider.initialize.mockResolvedValue(undefined)
-		mockAstProvider.getNodeWithIdentifier.mockResolvedValue({
-			type: "function_declaration",
-			text: testOriginalContent,
-			startPosition: { row: 0, column: 0 },
-			endPosition: { row: 0, column: testOriginalContent.length },
-			childForFieldName: (name: string) => {
-				if (name === "body") {
+		mockAstProvider = {
+			initialize: jest.fn().mockImplementation(async () => {}),
+			getNodeWithIdentifier: jest.fn().mockImplementation(async (filePath, identifier) => {
+				if (filePath === testFilePath && identifier === testFunctionId) {
 					return {
-						text: "{ return 'original'; }",
-						startPosition: { row: 0, column: 30 },
-						endPosition: { row: 0, column: 50 },
-					}
+						type: "function_declaration",
+						text: testOriginalContent,
+						startPosition: { row: 0, column: 0 },
+						endPosition: { row: 0, column: testOriginalContent.length },
+						childForFieldName: (name: string) => {
+							if (name === "body") {
+								return {
+									text: "{ return 'original'; }",
+									startPosition: { row: 0, column: 30 },
+									endPosition: { row: 0, column: 50 },
+								} as Parser.SyntaxNode
+							}
+							return null
+						},
+					} as Parser.SyntaxNode
 				}
 				return null
-			},
-		})
-		mockAstProvider.getRelatedFiles.mockReturnValue(new Set(["related1.ts", "related2.ts"]))
+			}),
+			getRelatedFiles: jest.fn().mockReturnValue(new Set(["related1.ts", "related2.ts"])),
+			getInstance: jest.fn(),
+			serializeAst: jest.fn(),
+			parseFile: jest.fn(),
+			setCacheEnabled: jest.fn(),
+			isCacheEnabled: jest.fn().mockReturnValue(true),
+			invalidateFile: jest.fn(),
+			getSymbolDatabase: jest.fn(),
+		} as unknown as jest.Mocked<AstProvider>
+		;(AstProvider.getInstance as jest.Mock).mockReturnValue(mockAstProvider)
 
 		// Setup rollback manager
+		mockRollbackManager = {
+			createBackup: jest.fn().mockImplementation(async () => true),
+			rollback: jest.fn().mockImplementation(async () => true),
+			getBackupInfo: jest.fn().mockReturnValue([
+				{
+					filePath: testFilePath,
+					operation: "modify_function_body",
+					timestamp: Date.now(),
+				},
+			]),
+			getInstance: jest.fn(),
+			setMaxBackupsPerFile: jest.fn(),
+		} as unknown as jest.Mocked<AstRollbackManager>
 		;(AstRollbackManager.getInstance as jest.Mock).mockReturnValue(mockRollbackManager)
-		mockRollbackManager.createBackup.mockResolvedValue(true)
-		mockRollbackManager.rollback.mockResolvedValue(true)
-		mockRollbackManager.getBackupInfo.mockReturnValue([
-			{
-				filePath: testFilePath,
-				operation: "modify_function_body",
-				timestamp: Date.now(),
-			},
-		])
 
 		// Setup semantic validator
+		mockSemanticValidator = {
+			validateChange: jest.fn().mockImplementation(async () => ({
+				isValid: true,
+				semanticScore: 0.9,
+				structuralScore: 0.95,
+			})),
+			validateFunctionBodyChange: jest.fn().mockImplementation(async () => ({
+				isValid: true,
+				message: "Valid change",
+				semanticScore: 0.9,
+				structuralScore: 0.95,
+			})),
+		} as unknown as jest.Mocked<SemanticValidator>
 		;(SemanticValidator as jest.Mock).mockImplementation(() => mockSemanticValidator)
-		mockSemanticValidator.validateChange.mockResolvedValue({
-			isValid: true,
-			semanticScore: 0.9,
-			structuralScore: 0.95,
-		})
-		mockSemanticValidator.validateFunctionBodyChange.mockResolvedValue({
-			isValid: true,
-			message: "Valid change",
-			semanticScore: 0.9,
-			structuralScore: 0.95,
-		})
 
 		// Setup embedding service
+		mockEmbeddingService = {
+			embedText: jest.fn().mockImplementation(async () => [0.1, 0.2, 0.3]),
+		} as unknown as jest.Mocked<NebiusEmbeddingService>
 		;(NebiusEmbeddingService as jest.Mock).mockImplementation(() => mockEmbeddingService)
-		mockEmbeddingService.embedText.mockResolvedValue([0.1, 0.2, 0.3])
 
 		// Mock fs functions
-		;(fs.access as jest.Mock).mockResolvedValue(undefined)
-		;(fs.readFile as jest.Mock).mockResolvedValue(testOriginalContent)
-		;(fs.writeFile as jest.Mock).mockResolvedValue(undefined)
+		jest.mocked(fs.access).mockImplementation(async () => {})
+		jest.mocked(fs.readFile).mockResolvedValue(testOriginalContent)
+		jest.mocked(fs.writeFile).mockImplementation(async () => {})
 
 		// Mock AST diff functions
-		;(astDiffModule.reconstructContentWithModifiedFunction as jest.Mock).mockResolvedValue(testReconstructedContent)
-		;(astDiffModule.getFunctionModifications as jest.Mock).mockResolvedValue([
-			{ type: "tool_use", functionName: "testFunction" },
+		jest.mocked(astDiffModule.reconstructContentWithModifiedFunction).mockResolvedValue(testReconstructedContent)
+		jest.mocked(astDiffModule.getFunctionModifications).mockResolvedValue([
+			{
+				type: "tool_use",
+				name: "modify_function_body",
+				params: {
+					path: testFilePath,
+					function_identifier: testFunctionId,
+					new_body: testNewBody,
+				},
+				partial: false,
+			} as ModifyFunctionBodyToolUse,
 		])
 	})
 
@@ -160,7 +175,7 @@ describe("ClineAstIntegration", () => {
 		})
 
 		it("should handle file not found errors", async () => {
-			;(fs.access as jest.Mock).mockRejectedValueOnce(new Error("File not found"))
+			jest.mocked(fs.access).mockRejectedValueOnce(new Error("File not found"))
 
 			const integration = new ClineAstIntegration()
 			const result = await integration.modifyFunctionBody(testCwd, testFilePath, testFunctionId, testNewBody)
@@ -170,7 +185,7 @@ describe("ClineAstIntegration", () => {
 		})
 
 		it("should handle reconstruction failures", async () => {
-			;(astDiffModule.reconstructContentWithModifiedFunction as jest.Mock).mockResolvedValueOnce(null)
+			jest.mocked(astDiffModule.reconstructContentWithModifiedFunction).mockResolvedValueOnce(null)
 
 			const integration = new ClineAstIntegration()
 			const result = await integration.modifyFunctionBody(testCwd, testFilePath, testFunctionId, testNewBody)
@@ -180,7 +195,7 @@ describe("ClineAstIntegration", () => {
 		})
 
 		it("should handle validation failures", async () => {
-			;(astDiffModule.getFunctionModifications as jest.Mock).mockResolvedValueOnce([])
+			jest.mocked(astDiffModule.getFunctionModifications).mockResolvedValueOnce([])
 
 			const integration = new ClineAstIntegration()
 			const result = await integration.modifyFunctionBody(testCwd, testFilePath, testFunctionId, testNewBody)
@@ -190,7 +205,7 @@ describe("ClineAstIntegration", () => {
 		})
 
 		it("should handle general errors during the process", async () => {
-			;(fs.readFile as jest.Mock).mockRejectedValueOnce(new Error("Read error"))
+			jest.mocked(fs.readFile).mockRejectedValueOnce(new Error("Read error"))
 
 			const integration = new ClineAstIntegration()
 			const result = await integration.modifyFunctionBody(testCwd, testFilePath, testFunctionId, testNewBody)
@@ -200,7 +215,7 @@ describe("ClineAstIntegration", () => {
 		})
 
 		it("should handle rollback failures", async () => {
-			;(astDiffModule.getFunctionModifications as jest.Mock).mockResolvedValueOnce([])
+			jest.mocked(astDiffModule.getFunctionModifications).mockResolvedValueOnce([])
 			mockRollbackManager.rollback.mockResolvedValueOnce(false)
 
 			const integration = new ClineAstIntegration()
@@ -248,7 +263,7 @@ describe("ClineAstIntegration", () => {
 		})
 
 		it("should handle missing node gracefully", async () => {
-			mockAstProvider.getNodeWithIdentifier.mockResolvedValueOnce(null)
+			mockAstProvider.getNodeWithIdentifier.mockImplementationOnce(async () => null)
 
 			const integration = new ClineAstIntegration()
 			const result = await integration.validateFunctionBodyChange(testFilePath, testFunctionId, testNewBody)
