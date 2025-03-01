@@ -85,6 +85,7 @@ describe("AstProvider", () => {
 				parser: {
 					parse: jest.fn().mockReturnValue(mockTree),
 				},
+				query: {}, // Added the missing query property
 			},
 		}
 

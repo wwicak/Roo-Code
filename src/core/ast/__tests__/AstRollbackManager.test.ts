@@ -33,25 +33,22 @@ describe("AstRollbackManager", () => {
 		// Get a new instance
 		rollbackManager = AstRollbackManager.getInstance()
 
-		// Mock fs functions
-		const mockReadFile = jest.fn(async (path: PathLike | FileHandle) => {
+		// Mock fs functions using jest.spyOn
+		jest.spyOn(fs, "readFile").mockImplementation(async (path: PathLike | FileHandle) => {
 			if (typeof path === "string" && path.includes("existing.ts")) {
 				return "function test() { return 'original'; }"
 			}
 			throw new Error("File not found")
 		})
-		Object.assign(fs, { readFile: mockReadFile })
 
-		const mockWriteFile = jest.fn(async () => undefined)
-		Object.assign(fs, { writeFile: mockWriteFile })
+		jest.spyOn(fs, "writeFile").mockImplementation(async () => undefined)
 
-		const mockAccess = jest.fn(async (path: PathLike | FileHandle) => {
+		jest.spyOn(fs, "access").mockImplementation(async (path: PathLike | FileHandle) => {
 			if (typeof path === "string" && path.includes("existing.ts")) {
 				return undefined
 			}
 			throw new Error("File not found")
 		})
-		Object.assign(fs, { access: mockAccess })
 	})
 
 	describe("Singleton behavior", () => {
@@ -181,7 +178,7 @@ describe("AstRollbackManager", () => {
 			await rollbackManager.createBackup(filePath, absolutePath, "modify")
 
 			// Mock fs.writeFile to fail
-			;(fs.writeFile as jest.Mock).mockRejectedValueOnce(new Error("Write error") as never)
+			jest.spyOn(fs, "writeFile").mockRejectedValueOnce(new Error("Write error"))
 
 			const result = await rollbackManager.rollback(filePath)
 

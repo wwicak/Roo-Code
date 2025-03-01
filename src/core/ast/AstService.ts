@@ -5,6 +5,7 @@ import { loadRequiredLanguageParsers } from "../../services/tree-sitter/language
 import { SymbolDatabase } from "./SymbolDatabase"
 import { AstCacheManager } from "./AstCacheManager"
 import { logger } from "../../utils/logging"
+import { AstErrorHandler, AstErrorCode } from "./AstErrorHandler"
 
 export interface AstNode {
 	type: string
@@ -88,7 +89,7 @@ export class AstProvider {
 		try {
 			// Check cache first if caching is enabled
 			if (this.cacheEnabled) {
-				const cachedTree = this.cacheManager.getCachedTree(filePath)
+				const cachedTree = await this.cacheManager.getCachedTree(filePath)
 				if (cachedTree) {
 					return cachedTree
 				}
@@ -96,26 +97,98 @@ export class AstProvider {
 
 			// Read file content if not provided
 			if (!content) {
-				content = await fs.readFile(filePath, "utf-8")
+				try {
+					content = await fs.readFile(filePath, "utf-8")
+				} catch (error) {
+					// Handle file read errors more explicitly
+					logger.error(`Error reading file ${filePath}:`, error)
+					throw AstErrorHandler.createError(
+						AstErrorCode.GENERAL_ERROR,
+						`Failed to read file: ${error instanceof Error ? error.message : String(error)}`,
+						{
+							filepath: filePath,
+						},
+					)
+				}
 			}
 
 			// Get language parser
 			const ext = path.extname(filePath).slice(1) // Remove the leading dot
-			const languageParsers = await loadRequiredLanguageParsers([filePath])
+
+			// Check file extension validity
+			if (!ext) {
+				throw AstErrorHandler.createError(AstErrorCode.PARSER_NOT_FOUND, `File has no extension`, {
+					filepath: filePath,
+				})
+			}
+
+			// Load language parsers with better error handling
+			let languageParsers
+			try {
+				languageParsers = await loadRequiredLanguageParsers([filePath])
+			} catch (error) {
+				throw AstErrorHandler.createError(
+					AstErrorCode.PARSER_NOT_FOUND,
+					`Failed to load language parsers: ${error instanceof Error ? error.message : String(error)}`,
+					{
+						filepath: filePath,
+						details: { extension: ext },
+					},
+				)
+			}
+
 			const languageParser = languageParsers[ext]
 
 			if (!languageParser) {
-				logger.warn(`No parser available for extension: ${ext}`)
-				return null
+				throw AstErrorHandler.createError(
+					AstErrorCode.PARSER_NOT_FOUND,
+					`No parser available for extension: ${ext}`,
+					{
+						filepath: filePath,
+						details: { extension: ext },
+					},
+				)
 			}
 
-			// Parse the file
-			const tree = languageParser.parser.parse(content)
+			// Parse the file with robust error handling
+			let tree: Parser.Tree
+			try {
+				tree = languageParser.parser.parse(content)
+
+				// Check for parse errors in the tree
+				const parseErrors = this.findParseErrors(tree.rootNode)
+				if (parseErrors.length > 0) {
+					throw AstErrorHandler.createError(
+						AstErrorCode.PARSE_ERROR,
+						`File contains ${parseErrors.length} syntax error(s)`,
+						{
+							filepath: filePath,
+							errorNodes: parseErrors.map((node) => ({
+								startPosition: node.startPosition,
+								type: node.type,
+							})),
+						},
+					)
+				}
+			} catch (error) {
+				// Handle parsing errors
+				if (AstErrorHandler.isAstError(error)) {
+					throw error // Rethrow AstError
+				}
+
+				throw AstErrorHandler.createError(
+					AstErrorCode.PARSE_ERROR,
+					`Parsing failed: ${error instanceof Error ? error.message : String(error)}`,
+					{
+						filepath: filePath,
+					},
+				)
+			}
 
 			// Cache the result if caching is enabled
 			this.activeTrees.set(filePath, tree)
 			if (this.cacheEnabled) {
-				this.cacheManager.cacheTree(filePath, tree)
+				await this.cacheManager.cacheTree(filePath, tree, content)
 			}
 
 			// Update symbol database
@@ -123,9 +196,45 @@ export class AstProvider {
 
 			return tree
 		} catch (error) {
-			logger.error(`Error parsing file ${filePath}:`, error)
-			return null
+			// Convert general errors to AstError format for consistent handling
+			const astError = AstErrorHandler.isAstError(error) ? error : AstErrorHandler.fromError(error, filePath)
+
+			// Convert to appropriate log meta format
+			const logMeta = {
+				error: astError,
+				code: astError.code,
+				filepath: astError.filepath,
+			}
+
+			logger.error(`Error parsing file ${filePath}:`, logMeta)
+
+			// Propagate the error so it can be handled upstream
+			throw astError
 		}
+	}
+
+	/**
+	 * Recursively find syntax error nodes in the parse tree
+	 * @param node The root node to search
+	 * @returns Array of error nodes
+	 */
+	private findParseErrors(node: Parser.SyntaxNode): Parser.SyntaxNode[] {
+		const errors: Parser.SyntaxNode[] = []
+
+		// Check if this node is an error
+		if (node.type === "ERROR" || node.hasError) {
+			errors.push(node)
+		}
+
+		// Recursively check children
+		for (let i = 0; i < node.childCount; i++) {
+			const child = node.child(i)
+			if (child) {
+				errors.push(...this.findParseErrors(child))
+			}
+		}
+
+		return errors
 	}
 
 	/**

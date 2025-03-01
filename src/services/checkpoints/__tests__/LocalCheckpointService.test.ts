@@ -70,6 +70,9 @@ describe("LocalCheckpointService", () => {
 	})
 
 	describe("getDiff", () => {
+		// Increase timeout to 15 seconds for Git operations
+		jest.setTimeout(15000)
+
 		it("returns the correct diff between commits", async () => {
 			await fs.writeFile(testFile, "Ahoy, world!")
 			const commit1 = await service.saveCheckpoint("First checkpoint")

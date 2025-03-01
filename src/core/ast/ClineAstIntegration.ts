@@ -84,8 +84,18 @@ export class ClineAstIntegration {
 	/**
 	 * Create a new ClineAstIntegration instance
 	 * @param config Configuration options or embedding API key
+	 * @param dependencies Optional dependencies for dependency injection
 	 */
-	constructor(config: ClineAstIntegrationConfig | string = {}) {
+	constructor(
+		config: ClineAstIntegrationConfig | string = {},
+		dependencies?: {
+			astProvider?: AstProvider
+			rollbackManager?: AstRollbackManager
+			validator?: SemanticValidator
+			embeddingService?: NebiusEmbeddingService
+			cacheManager?: AstCacheManager
+		},
+	) {
 		// Handle string parameter for backward compatibility
 		if (typeof config === "string") {
 			this.config = {
@@ -106,24 +116,32 @@ export class ClineAstIntegration {
 			}
 		}
 
-		// Initialize services
-		this.astProvider = AstProvider.getInstance()
-		this.rollbackManager = AstRollbackManager.getInstance()
-		this.cacheManager = new AstCacheManager()
+		// Initialize services with dependency injection
+		this.astProvider = dependencies?.astProvider || AstProvider.getInstance()
+		this.rollbackManager = dependencies?.rollbackManager || AstRollbackManager.getInstance()
+		this.cacheManager = dependencies?.cacheManager || new AstCacheManager()
 
 		// If a custom limit is set, apply it
 		if (typeof config === "object" && config.maxBackupsPerFile) {
 			this.rollbackManager.setMaxBackupsPerFile(this.config.maxBackupsPerFile)
 		}
 
-		if (this.config.embeddingApiKey) {
-			this.embeddingService = new NebiusEmbeddingService(this.config.embeddingApiKey)
+		// Use injected validator and embedding service or create new ones
+		if (dependencies?.validator) {
+			this.validator = dependencies.validator
+		} else if (this.config.embeddingApiKey) {
 			this.validator = new SemanticValidator(this.config.embeddingApiKey)
 		} else {
 			logger.warn("No embedding API key provided. Semantic validation will be limited.")
-			this.embeddingService = new NebiusEmbeddingService("")
 			this.validator = new SemanticValidator("")
 		}
+
+		// Use injected embedding service or create a new one
+		this.embeddingService =
+			dependencies?.embeddingService ||
+			(this.config.embeddingApiKey
+				? new NebiusEmbeddingService(this.config.embeddingApiKey)
+				: new NebiusEmbeddingService(""))
 
 		// Configure caching
 		if (!this.config.enableAstCaching) {

@@ -2,6 +2,7 @@ import { Diff, Hunk, Change } from "./types"
 import { findBestMatch, prepareSearchString } from "./search-strategies"
 import { applyEdit } from "./edit-strategies"
 import { DiffResult, DiffStrategy } from "../../types"
+import { logger } from "../../../utils/logging"
 
 export class NewUnifiedDiffStrategy implements DiffStrategy {
 	private readonly confidenceThreshold: number
@@ -16,15 +17,35 @@ export class NewUnifiedDiffStrategy implements DiffStrategy {
 		const hunks: Hunk[] = []
 		let currentHunk: Hunk | null = null
 
+		// Check for empty diff
+		if (!diff.trim()) {
+			logger.warn("Empty diff provided to parseUnifiedDiff")
+			return { hunks: [] }
+		}
+
+		// Find the first hunk header
 		let i = 0
+		let foundHunkHeader = false
 		while (i < lines.length && !lines[i].startsWith("@@")) {
+			// Verify that this looks like a valid unified diff
+			if (i === 0 && !lines[i].startsWith("---") && !lines[i].startsWith("diff --git")) {
+				logger.warn("Diff does not start with expected header (--- or diff --git)")
+			}
 			i++
 		}
+
+		if (i >= lines.length) {
+			logger.warn("No hunk headers (@@) found in diff")
+			return { hunks: [] }
+		}
+
+		foundHunkHeader = true
 
 		for (; i < lines.length; i++) {
 			const line = lines[i]
 
 			if (line.startsWith("@@")) {
+				// Process previous hunk if it exists
 				if (
 					currentHunk &&
 					currentHunk.changes.length > 0 &&
@@ -48,60 +69,87 @@ export class NewUnifiedDiffStrategy implements DiffStrategy {
 						}
 					}
 
-					currentHunk.changes = changes.slice(startIdx, endIdx + 1)
+					currentHunk = {
+						...currentHunk,
+						changes: changes.slice(startIdx, endIdx + 1),
+					}
+
 					hunks.push(currentHunk)
 				}
-				currentHunk = { changes: [] }
-				continue
-			}
 
-			if (!currentHunk) {
-				continue
-			}
+				// Parse hunk header
+				// Format: @@ -oldStart,oldCount +newStart,newCount @@
+				const headerMatch = line.match(/@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/)
+				if (!headerMatch) {
+					logger.warn(`Malformed hunk header: ${line}`)
+					continue // Skip this hunk
+				}
 
-			const content = line.slice(1)
-			const indentMatch = content.match(/^(\s*)/)
-			const indent = indentMatch ? indentMatch[0] : ""
-			const trimmedContent = content.slice(indent.length)
+				const oldStart = parseInt(headerMatch[1], 10)
+				const oldCount = headerMatch[2] ? parseInt(headerMatch[2], 10) : 1
+				const newStart = parseInt(headerMatch[3], 10)
+				const newCount = headerMatch[4] ? parseInt(headerMatch[4], 10) : 1
 
-			if (line.startsWith(" ")) {
-				currentHunk.changes.push({
-					type: "context",
-					content: trimmedContent,
-					indent,
-					originalLine: content,
-				})
-			} else if (line.startsWith("+")) {
-				currentHunk.changes.push({
-					type: "add",
-					content: trimmedContent,
-					indent,
-					originalLine: content,
-				})
-			} else if (line.startsWith("-")) {
-				currentHunk.changes.push({
-					type: "remove",
-					content: trimmedContent,
-					indent,
-					originalLine: content,
-				})
-			} else {
-				const finalContent = trimmedContent ? " " + trimmedContent : " "
-				currentHunk.changes.push({
-					type: "context",
-					content: finalContent,
-					indent,
-					originalLine: content,
-				})
+				// Validate line numbers
+				if (isNaN(oldStart) || isNaN(oldCount) || isNaN(newStart) || isNaN(newCount)) {
+					logger.warn(`Invalid line numbers in hunk header: ${line}`)
+					continue // Skip this hunk
+				}
+
+				// Create new hunk
+				currentHunk = {
+					oldStart,
+					oldCount,
+					newStart,
+					newCount,
+					changes: [],
+				}
+			} else if (currentHunk) {
+				// Process line within current hunk
+				if (line.startsWith("+")) {
+					currentHunk.changes.push({
+						type: "add",
+						content: line.substring(1),
+					})
+				} else if (line.startsWith("-")) {
+					currentHunk.changes.push({
+						type: "remove",
+						content: line.substring(1),
+					})
+				} else if (line.startsWith(" ")) {
+					currentHunk.changes.push({
+						type: "context",
+						content: line.substring(1),
+					})
+				} else if (line.length === 0) {
+					// Empty line (probably a context line without leading space)
+					currentHunk.changes.push({
+						type: "context",
+						content: "",
+					})
+				} else {
+					// Unexpected line format, treat as context to be safe
+					logger.warn(`Unexpected line format in hunk: ${line}`)
+					currentHunk.changes.push({
+						type: "context",
+						content: line,
+					})
+				}
 			}
 		}
 
+		// Don't forget to process the last hunk
 		if (
 			currentHunk &&
 			currentHunk.changes.length > 0 &&
 			currentHunk.changes.some((change) => change.type === "add" || change.type === "remove")
 		) {
 			hunks.push(currentHunk)
+		}
+
+		// Return empty hunks if none were found
+		if (hunks.length === 0 && foundHunkHeader) {
+			logger.warn("No valid hunks found in diff")
 		}
 
 		return { hunks }
@@ -235,116 +283,52 @@ Your diff here
 		startLine?: number,
 		endLine?: number,
 	): Promise<DiffResult> {
-		const parsedDiff = this.parseUnifiedDiff(diffContent)
-		const originalLines = originalContent.split("\n")
-		let result = [...originalLines]
-
-		if (!parsedDiff.hunks.length) {
+		// Skip empty diffs
+		if (!diffContent.trim()) {
 			return {
 				success: false,
-				error: "No hunks found in diff. Please ensure your diff includes actual changes and follows the unified diff format.",
+				content: originalContent,
+				message: "Empty diff content provided",
 			}
 		}
 
-		for (const hunk of parsedDiff.hunks) {
-			const contextStr = prepareSearchString(hunk.changes)
-			const {
-				index: matchPosition,
-				confidence,
-				strategy,
-			} = findBestMatch(contextStr, result, 0, this.confidenceThreshold)
+		try {
+			// Parse the diff
+			const diff = this.parseUnifiedDiff(diffContent)
 
-			if (confidence < this.confidenceThreshold) {
-				console.log("Full hunk application failed, trying sub-hunks strategy")
-				// Try splitting the hunk into smaller hunks
-				const subHunks = this.splitHunk(hunk)
-				let subHunkSuccess = true
-				let subHunkResult = [...result]
-
-				for (const subHunk of subHunks) {
-					const subContextStr = prepareSearchString(subHunk.changes)
-					const subSearchResult = findBestMatch(subContextStr, subHunkResult, 0, this.confidenceThreshold)
-
-					if (subSearchResult.confidence >= this.confidenceThreshold) {
-						const subEditResult = await applyEdit(
-							subHunk,
-							subHunkResult,
-							subSearchResult.index,
-							subSearchResult.confidence,
-							this.confidenceThreshold,
-						)
-						if (subEditResult.confidence >= this.confidenceThreshold) {
-							subHunkResult = subEditResult.result
-							continue
-						}
-					}
-					subHunkSuccess = false
-					break
+			// Check if diff parsing was successful
+			if (diff.hunks.length === 0) {
+				return {
+					success: false,
+					content: originalContent,
+					message: "No valid hunks found in diff",
 				}
-
-				if (subHunkSuccess) {
-					result = subHunkResult
-					continue
-				}
-
-				// If sub-hunks also failed, return the original error
-				const contextLines = hunk.changes.filter((c) => c.type === "context").length
-				const totalLines = hunk.changes.length
-				const contextRatio = contextLines / totalLines
-
-				let errorMsg = `Failed to find a matching location in the file (${Math.floor(
-					confidence * 100,
-				)}% confidence, needs ${Math.floor(this.confidenceThreshold * 100)}%)\n\n`
-				errorMsg += "Debug Info:\n"
-				errorMsg += `- Search Strategy Used: ${strategy}\n`
-				errorMsg += `- Context Lines: ${contextLines} out of ${totalLines} total lines (${Math.floor(
-					contextRatio * 100,
-				)}%)\n`
-				errorMsg += `- Attempted to split into ${subHunks.length} sub-hunks but still failed\n`
-
-				if (contextRatio < 0.2) {
-					errorMsg += "\nPossible Issues:\n"
-					errorMsg += "- Not enough context lines to uniquely identify the location\n"
-					errorMsg += "- Add a few more lines of unchanged code around your changes\n"
-				} else if (contextRatio > 0.5) {
-					errorMsg += "\nPossible Issues:\n"
-					errorMsg += "- Too many context lines may reduce search accuracy\n"
-					errorMsg += "- Try to keep only 2-3 lines of context before and after changes\n"
-				} else {
-					errorMsg += "\nPossible Issues:\n"
-					errorMsg += "- The diff may be targeting a different version of the file\n"
-					errorMsg +=
-						"- There may be too many changes in a single hunk, try splitting the changes into multiple hunks\n"
-				}
-
-				if (startLine && endLine) {
-					errorMsg += `\nSearch Range: lines ${startLine}-${endLine}\n`
-				}
-
-				return { success: false, error: errorMsg }
 			}
 
-			const editResult = await applyEdit(hunk, result, matchPosition, confidence, this.confidenceThreshold)
-			if (editResult.confidence >= this.confidenceThreshold) {
-				result = editResult.result
-			} else {
-				// Edit failure - likely due to content mismatch
-				let errorMsg = `Failed to apply the edit using ${editResult.strategy} strategy (${Math.floor(
-					editResult.confidence * 100,
-				)}% confidence)\n\n`
-				errorMsg += "Debug Info:\n"
-				errorMsg += "- The location was found but the content didn't match exactly\n"
-				errorMsg += "- This usually means the file has been modified since the diff was created\n"
-				errorMsg += "- Or the diff may be targeting a different version of the file\n"
-				errorMsg += "\nPossible Solutions:\n"
-				errorMsg += "1. Refresh your view of the file and create a new diff\n"
-				errorMsg += "2. Double-check that the removed lines (-) match the current file content\n"
-				errorMsg += "3. Ensure your diff targets the correct version of the file"
+			// Apply the edits
+			const { result, success, message } = await applyEdit(originalContent, diff, startLine, endLine)
 
-				return { success: false, error: errorMsg }
+			// Validate that the edit was applied successfully
+			if (!success || !result) {
+				return {
+					success: false,
+					content: originalContent,
+					message: message || "Failed to apply diff",
+				}
+			}
+
+			return {
+				success: true,
+				content: result,
+				message: message || "Diff applied successfully",
+			}
+		} catch (error) {
+			logger.error("Error applying unified diff:", error)
+			return {
+				success: false,
+				content: originalContent,
+				message: `Error applying diff: ${error instanceof Error ? error.message : String(error)}`,
 			}
 		}
-
-		return { success: true, content: result.join("\n") }
 	}
 }
