@@ -2,7 +2,7 @@ import { Diff, Hunk, Change } from "./types"
 import { findBestMatch, prepareSearchString } from "./search-strategies"
 import { applyEdit } from "./edit-strategies"
 import { DiffResult, DiffStrategy } from "../../types"
-import { logger } from "../../../utils/logging"
+import { logger } from "../../../../utils/logging"
 
 export class NewUnifiedDiffStrategy implements DiffStrategy {
 	private readonly confidenceThreshold: number
@@ -69,12 +69,10 @@ export class NewUnifiedDiffStrategy implements DiffStrategy {
 						}
 					}
 
-					currentHunk = {
-						...currentHunk,
+					const newHunk: Hunk = {
 						changes: changes.slice(startIdx, endIdx + 1),
 					}
-
-					hunks.push(currentHunk)
+					hunks.push(newHunk)
 				}
 
 				// Parse hunk header
@@ -85,47 +83,38 @@ export class NewUnifiedDiffStrategy implements DiffStrategy {
 					continue // Skip this hunk
 				}
 
-				const oldStart = parseInt(headerMatch[1], 10)
-				const oldCount = headerMatch[2] ? parseInt(headerMatch[2], 10) : 1
-				const newStart = parseInt(headerMatch[3], 10)
-				const newCount = headerMatch[4] ? parseInt(headerMatch[4], 10) : 1
-
-				// Validate line numbers
-				if (isNaN(oldStart) || isNaN(oldCount) || isNaN(newStart) || isNaN(newCount)) {
-					logger.warn(`Invalid line numbers in hunk header: ${line}`)
-					continue // Skip this hunk
-				}
-
 				// Create new hunk
 				currentHunk = {
-					oldStart,
-					oldCount,
-					newStart,
-					newCount,
 					changes: [],
 				}
 			} else if (currentHunk) {
 				// Process line within current hunk
+				const indent = line.match(/^(\s*)/)?.[1] || ""
+
 				if (line.startsWith("+")) {
 					currentHunk.changes.push({
 						type: "add",
 						content: line.substring(1),
+						indent,
 					})
 				} else if (line.startsWith("-")) {
 					currentHunk.changes.push({
 						type: "remove",
 						content: line.substring(1),
+						indent,
 					})
 				} else if (line.startsWith(" ")) {
 					currentHunk.changes.push({
 						type: "context",
 						content: line.substring(1),
+						indent,
 					})
 				} else if (line.length === 0) {
 					// Empty line (probably a context line without leading space)
 					currentHunk.changes.push({
 						type: "context",
 						content: "",
+						indent: "",
 					})
 				} else {
 					// Unexpected line format, treat as context to be safe
@@ -133,6 +122,7 @@ export class NewUnifiedDiffStrategy implements DiffStrategy {
 					currentHunk.changes.push({
 						type: "context",
 						content: line,
+						indent: "",
 					})
 				}
 			}
@@ -287,8 +277,7 @@ Your diff here
 		if (!diffContent.trim()) {
 			return {
 				success: false,
-				content: originalContent,
-				message: "Empty diff content provided",
+				error: "Empty diff content provided",
 			}
 		}
 
@@ -300,34 +289,60 @@ Your diff here
 			if (diff.hunks.length === 0) {
 				return {
 					success: false,
-					content: originalContent,
-					message: "No valid hunks found in diff",
+					error: "No valid hunks found in diff",
 				}
 			}
 
-			// Apply the edits
-			const { result, success, message } = await applyEdit(originalContent, diff, startLine, endLine)
+			// Convert original content to lines
+			const contentLines = originalContent.split("\n")
 
-			// Validate that the edit was applied successfully
-			if (!success || !result) {
-				return {
-					success: false,
-					content: originalContent,
-					message: message || "Failed to apply diff",
+			// For each hunk, find the best match and apply the edit
+			let modifiedContent = originalContent
+
+			for (const hunk of diff.hunks) {
+				// Prepare search string from context lines in the hunk
+				const searchStr = prepareSearchString(hunk.changes)
+
+				// Find the best match position in the content
+				const matchResult = findBestMatch(searchStr, contentLines, 0, this.confidenceThreshold)
+
+				if (matchResult.confidence < this.confidenceThreshold) {
+					return {
+						success: false,
+						error: `Could not find a good match for the hunk (confidence: ${matchResult.confidence.toFixed(2)})`,
+					}
+				}
+
+				// Apply the edit using the best matching strategy
+				const editResult = await applyEdit(
+					hunk,
+					contentLines,
+					matchResult.index,
+					matchResult.confidence,
+					this.confidenceThreshold,
+				)
+
+				// Update the content for the next iteration
+				if (editResult.confidence >= this.confidenceThreshold) {
+					modifiedContent = editResult.result.join("\n")
+					contentLines.splice(0, contentLines.length, ...editResult.result)
+				} else {
+					return {
+						success: false,
+						error: `Failed to apply edit (confidence: ${editResult.confidence.toFixed(2)})`,
+					}
 				}
 			}
 
 			return {
 				success: true,
-				content: result,
-				message: message || "Diff applied successfully",
+				content: modifiedContent,
 			}
 		} catch (error) {
 			logger.error("Error applying unified diff:", error)
 			return {
 				success: false,
-				content: originalContent,
-				message: `Error applying diff: ${error instanceof Error ? error.message : String(error)}`,
+				error: `Error applying diff: ${error instanceof Error ? error.message : String(error)}`,
 			}
 		}
 	}
