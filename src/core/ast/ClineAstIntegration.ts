@@ -197,7 +197,7 @@ export class ClineAstIntegration {
 			const originalContent = await fs.readFile(absolutePath, "utf-8")
 
 			// Create a backup
-			await this.rollbackManager.createBackup(filePath, absolutePath, "modify_function_body")
+			await this.rollbackManager.createBackup(filePath, absolutePath, "apply_ast_diff")
 
 			// Try to reconstruct content with the modified function
 			const reconstructedContent = await reconstructContentWithModifiedFunction(

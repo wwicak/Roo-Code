@@ -1,11 +1,12 @@
 import Parser from "web-tree-sitter"
 import { loadRequiredLanguageParsers } from "../../../../services/tree-sitter/languageParser"
-import { ToolUse, ModifyFunctionBodyToolUse } from "../../../assistant-message"
+import { ToolUse, ApplyAstDiffToolUse } from "../../../assistant-message"
 import * as path from "path"
 import { cosineSimilarity } from "../../../../utils/cosineSimilarity"
 import { NebiusEmbeddingService } from "../../../../services/embedding/NebiusEmbeddingService"
 import fs from "fs/promises"
 
+// Define the Change interface for diffing
 interface Change {
 	type: "added" | "removed" | "modified"
 	oldNode?: Parser.SyntaxNode
@@ -104,7 +105,7 @@ export async function getFunctionModifications(
 	newCode: string,
 	filePath: string,
 	embeddingService: NebiusEmbeddingService,
-): Promise<ModifyFunctionBodyToolUse[] | null> {
+): Promise<ApplyAstDiffToolUse[] | null> {
 	const ext = path.extname(filePath).slice(1) // ".ts" -> "ts"
 
 	const languageParsers = await loadRequiredLanguageParsers([filePath])
@@ -121,7 +122,7 @@ export async function getFunctionModifications(
 	const changes: Change[] = []
 	await diffNodes(oldTree.rootNode, newTree.rootNode, changes, embeddingService, filePath)
 
-	const modifications: ModifyFunctionBodyToolUse[] = []
+	const modifications: ApplyAstDiffToolUse[] = []
 
 	for (const change of changes) {
 		if (change.type === "modified" && change.oldNode && change.newNode) {
@@ -133,14 +134,13 @@ export async function getFunctionModifications(
 			) {
 				modifications.push({
 					type: "tool_use",
-					name: "modify_function_body",
+					name: "apply_ast_diff",
 					params: {
 						path: filePath,
-						function_identifier: getNodeIdentifier(change.oldNode),
-						new_body: await getNodeBody(change.newNode),
+						diff: await getNodeBody(change.newNode),
 					},
 					partial: false,
-				})
+				} as ApplyAstDiffToolUse)
 			}
 		}
 	}

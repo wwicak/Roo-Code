@@ -83,7 +83,7 @@ describe("AstRollbackManager", () => {
 		it("should create a backup of a file", async () => {
 			const filePath = "test.ts"
 			const absolutePath = "/path/to/existing.ts"
-			const operation = "modify_function_body"
+			const operation = "apply_ast_diff"
 			const metadata = { functionName: "test" }
 
 			const result = await rollbackManager.createBackup(filePath, absolutePath, operation, metadata)

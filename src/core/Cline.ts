@@ -1337,18 +1337,16 @@ export class Cline {
 				}
 
 				switch (block.name) {
-					case "modify_function_body": {
+					case "apply_ast_diff": {
 						const relPath: string | undefined = block.params.path
-						const functionId: string | undefined = block.params.function_identifier
-						const newBody: string | undefined = block.params.new_body
-						if (!relPath || !functionId || !newBody) {
+						const diffContent: string | undefined = block.params.diff
+						if (!relPath || !diffContent) {
 							// Wait for complete parameters
 							break
 						}
 
 						const absolutePath = path.resolve(cwd, relPath)
 						const fileExists = await fileExistsAtPath(absolutePath)
-
 						if (!fileExists) {
 							this.consecutiveMistakeCount++
 							pushToolResult(formatResponse.toolError(`File does not exist at path: ${absolutePath}`))
@@ -1362,8 +1360,8 @@ export class Cline {
 							const result = await this.astIntegration.modifyFunctionBody(
 								cwd,
 								relPath,
-								functionId,
-								newBody,
+								"", // Empty string instead of undefined
+								diffContent,
 							)
 
 							if (!result.success) {
@@ -1377,8 +1375,8 @@ export class Cline {
 							// Reconstruct content to show in diff view
 							const reconstructedContent = await reconstructContentWithModifiedFunction(
 								oldContent,
-								functionId,
-								newBody,
+								"", // Empty string instead of undefined
+								diffContent,
 								relPath,
 							)
 
@@ -2957,7 +2955,7 @@ export class Cline {
 			)
 			if (response === "messageResponse") {
 				this.consecutiveMistakeCount = 0
-				await this.say("message", text, images)
+				await this.say("text", text, images)
 				return this.recursivelyMakeClineRequests(this.userMessageContent as UserContent, includeFileDetails)
 			}
 			if (response === "noButtonClicked") {

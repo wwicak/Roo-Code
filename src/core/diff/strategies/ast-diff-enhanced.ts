@@ -3,21 +3,22 @@ import * as path from "path"
 import * as fs from "fs/promises"
 import { loadRequiredLanguageParsers } from "../../../services/tree-sitter/languageParser"
 import { NebiusEmbeddingService } from "../../../services/embedding/NebiusEmbeddingService"
-import { ModifyFunctionBodyToolUse } from "../../assistant-message"
+import { ToolUse, ApplyAstDiffToolUse } from "../../assistant-message"
 import { AstProvider } from "../../ast/AstService"
 import { AstErrorHandler, AstErrorCode } from "../../ast/AstErrorHandler"
 import { SemanticValidator } from "../../ast/SemanticValidator"
 import { logger } from "../../../utils/logging"
 
+/**
+ * Enhanced version of the AST diff implementation that leverages the AST services
+ */
+
+// Define the Change interface for diffing
 interface Change {
 	type: "added" | "removed" | "modified"
 	oldNode?: Parser.SyntaxNode
 	newNode?: Parser.SyntaxNode
 }
-
-/**
- * Enhanced version of the AST diff implementation that leverages the AST services
- */
 
 /**
  * Get a unique identifier for an AST node
@@ -192,7 +193,7 @@ export async function getFunctionModifications(
 	newCode: string,
 	filePath: string,
 	embeddingService: NebiusEmbeddingService,
-): Promise<ModifyFunctionBodyToolUse[] | null> {
+): Promise<ApplyAstDiffToolUse[] | null> {
 	const ext = path.extname(filePath).slice(1)
 
 	try {
@@ -217,7 +218,7 @@ export async function getFunctionModifications(
 		await diffNodes(oldTree.rootNode, newTree.rootNode, changes, embeddingService, filePath)
 
 		// Create modification tool uses
-		const modifications: ModifyFunctionBodyToolUse[] = []
+		const modifications: ApplyAstDiffToolUse[] = []
 
 		// Track rejected modifications for diagnostics
 		const rejectedModifications: Array<{
@@ -249,14 +250,13 @@ export async function getFunctionModifications(
 					if (isValid) {
 						modifications.push({
 							type: "tool_use",
-							name: "modify_function_body",
+							name: "apply_ast_diff",
 							params: {
 								path: filePath,
-								function_identifier: getNodeIdentifier(change.oldNode),
-								new_body: await getNodeBody(change.newNode),
+								diff: await getNodeBody(change.newNode),
 							},
 							partial: false,
-						})
+						} as ApplyAstDiffToolUse)
 					} else {
 						// Track rejected modification for debugging
 						rejectedModifications.push({

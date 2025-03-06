@@ -64,7 +64,7 @@ export class AstRollbackManager {
 	public async createBackup(
 		filePath: string,
 		absolutePath: string,
-		operation: string = "modify_function_body",
+		operation: string = "apply_ast_diff",
 		metadata?: Record<string, any>,
 	): Promise<boolean> {
 		try {

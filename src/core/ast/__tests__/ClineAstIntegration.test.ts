@@ -9,8 +9,8 @@ import { SemanticValidator } from "../SemanticValidator"
 import { NebiusEmbeddingService } from "../../../services/embedding/NebiusEmbeddingService"
 import * as astDiffModule from "../../diff/strategies/ast-diff-enhanced"
 import { AstErrorCode } from "../AstErrorHandler"
-import { ModifyFunctionBodyToolUse } from "../../assistant-message"
 import { MockType, AsyncMockType } from "./mockTypes"
+import { ApplyAstDiffToolUse } from "../../assistant-message"
 
 // Mock dependencies
 jest.mock("../AstService")
@@ -89,7 +89,7 @@ describe("ClineAstIntegration", () => {
 			getBackupInfo: jest.fn().mockReturnValue([
 				{
 					filePath: testFilePath,
-					operation: "modify_function_body",
+					operation: "apply_ast_diff",
 					timestamp: Date.now(),
 				},
 			]),
@@ -130,14 +130,13 @@ describe("ClineAstIntegration", () => {
 		jest.mocked(astDiffModule.getFunctionModifications).mockResolvedValue([
 			{
 				type: "tool_use",
-				name: "modify_function_body",
+				name: "apply_ast_diff",
 				params: {
 					path: testFilePath,
-					function_identifier: testFunctionId,
-					new_body: testNewBody,
+					diff: testNewBody,
 				},
 				partial: false,
-			} as ModifyFunctionBodyToolUse,
+			} as ApplyAstDiffToolUse,
 		])
 	})
 
@@ -250,7 +249,7 @@ describe("ClineAstIntegration", () => {
 			const result = integration.getBackupInfo(testFilePath)
 
 			expect(result.hasBackups).toBe(true)
-			expect(result.operations).toEqual(["modify_function_body"])
+			expect(result.operations).toEqual(["apply_ast_diff"])
 		})
 	})
 

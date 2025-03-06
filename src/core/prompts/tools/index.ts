@@ -1,7 +1,7 @@
 import { getExecuteCommandDescription } from "./execute-command"
 import { getReadFileDescription } from "./read-file"
 import { getWriteToFileDescription } from "./write-to-file"
-import { getModifyFunctionBodyDescription } from "./modify-function-body"
+import { getApplyAstDiffDescription } from "./apply-ast-diff"
 import { getSearchFilesDescription } from "./search-files"
 import { getListFilesDescription } from "./list-files"
 import { getInsertContentDescription } from "./insert-content"
@@ -25,7 +25,7 @@ const toolDescriptionMap: Record<string, (args: ToolArgs) => string | undefined>
 	execute_command: (args) => getExecuteCommandDescription(args),
 	read_file: (args) => getReadFileDescription(args),
 	write_to_file: (args) => getWriteToFileDescription(args),
-	modify_function_body: (args) => getModifyFunctionBodyDescription(args),
+	apply_ast_diff: (args) => getApplyAstDiffDescription(args),
 	search_files: (args) => getSearchFilesDescription(args),
 	list_files: (args) => getListFilesDescription(args),
 	list_code_definition_names: (args) => getListCodeDefinitionNamesDescription(args),
