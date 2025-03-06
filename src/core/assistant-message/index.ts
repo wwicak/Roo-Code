@@ -11,7 +11,6 @@ export interface TextContent {
 export const toolUseNames = [
 	"execute_command",
 	"read_file",
-	"modify_function_body",
 	"write_to_file",
 	"apply_diff",
 	"insert_content",
@@ -80,11 +79,6 @@ export interface ExecuteCommandToolUse extends ToolUse {
 export interface ReadFileToolUse extends ToolUse {
 	name: "read_file"
 	params: Partial<Pick<Record<ToolParamName, string>, "path">>
-}
-
-export interface ModifyFunctionBodyToolUse extends ToolUse {
-	name: "modify_function_body"
-	params: Partial<Pick<Record<ToolParamName, string>, "path" | "function_identifier" | "new_body">>
 }
 
 export interface WriteToFileToolUse extends ToolUse {

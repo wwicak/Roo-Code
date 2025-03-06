@@ -7,6 +7,8 @@ import { CodeActionProvider } from "./core/CodeActionProvider"
 import { DIFF_VIEW_URI_SCHEME } from "./integrations/editor/DiffViewProvider"
 import { handleUri, registerCommands, registerCodeActions, registerTerminalActions } from "./activate"
 import { McpServerManager } from "./services/mcp/McpServerManager"
+import { ContextProvider } from "./core/contextProvider"
+import { logger } from "./utils/logging"
 
 /**
  * Built using https://github.com/microsoft/vscode-webview-ui-toolkit
@@ -18,10 +20,17 @@ import { McpServerManager } from "./services/mcp/McpServerManager"
 
 let outputChannel: vscode.OutputChannel
 let extensionContext: vscode.ExtensionContext
+let contextProvider: ContextProvider
 
 // This method is called when your extension is activated.
 // Your extension is activated the very first time the command is executed.
 export function activate(context: vscode.ExtensionContext) {
+	logger.info("Roo-Code extension is activating...")
+
+	// Initialize Context Provider
+	contextProvider = new ContextProvider()
+	logger.info("Context Provider initialized.")
+
 	extensionContext = context
 	outputChannel = vscode.window.createOutputChannel("Roo-Code")
 	context.subscriptions.push(outputChannel)
@@ -88,7 +97,12 @@ export function activate(context: vscode.ExtensionContext) {
 
 // This method is called when your extension is deactivated
 export async function deactivate() {
-	outputChannel.appendLine("Roo-Code extension deactivated")
+	logger.info("Roo-Code extension is deactivating...")
 	// Clean up MCP server manager
 	await McpServerManager.cleanup(extensionContext)
+}
+
+// Export ContextProvider for use in other modules
+export function getContextProvider(): ContextProvider {
+	return contextProvider
 }

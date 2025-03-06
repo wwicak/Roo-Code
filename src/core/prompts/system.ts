@@ -25,6 +25,10 @@ import {
 } from "./sections"
 import fs from "fs/promises"
 import path from "path"
+import { logger } from "../../utils/logging"
+
+// Add logging message to indicate integration of AST diffing
+logger.info("System prompt initialized with AST diffing instructions.")
 
 async function generatePrompt(
 	context: vscode.ExtensionContext,
@@ -58,6 +62,7 @@ async function generatePrompt(
 	const modeConfig = getModeBySlug(mode, customModeConfigs) || modes.find((m) => m.slug === mode) || modes[0]
 	const roleDefinition = promptComponent?.roleDefinition || modeConfig.roleDefinition
 
+	// Add AST diffing instructions to the base prompt
 	const basePrompt = `${roleDefinition}
 
 ${getSharedToolUseSection()}
@@ -86,6 +91,18 @@ ${getRulesSection(cwd, supportsComputerUse, effectiveDiffStrategy, experiments)}
 ${getSystemInfoSection(cwd, mode, customModeConfigs)}
 
 ${getObjectiveSection()}
+
+For code modifications, use the 'apply_ast_diff' tool, which leverages AST-based diffing for accurate function-level changes. Provide the full modified content in the diff parameter.
+
+Example:
+<apply_ast_diff>
+<path>src/math.js</path>
+<diff>
+function add(a, b) {
+    return a + b + 1;
+}
+</diff>
+</apply_ast_diff>
 
 ${await addCustomInstructions(promptComponent?.customInstructions || modeConfig.customInstructions || "", globalCustomInstructions || "", cwd, mode, { preferredLanguage })}`
 
